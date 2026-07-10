@@ -1,0 +1,2 @@
+import { NextResponse } from 'next/server';import { requireSession } from '@/lib/auth';import { prisma } from '@/lib/db';import { encrypt } from '@/lib/crypto';
+export async function POST(req:Request){const s=await requireSession();const b=await req.json();await prisma.cin7Connection.upsert({where:{companyId:s.companyId},update:{accountId:b.accountId,apiKeyEncrypted:encrypt(b.apiKey)},create:{companyId:s.companyId,accountId:b.accountId,apiKeyEncrypted:encrypt(b.apiKey)}});return new NextResponse('Cin7 saved');}
