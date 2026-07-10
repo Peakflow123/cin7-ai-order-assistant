@@ -8,11 +8,10 @@
     "start": "next start",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev --name init",
-    "prisma:deploy": "prisma migrate deploy",
-    "prisma:studio": "prisma studio"
+    "prisma:deploy": "prisma migrate deploy"
   },
   "dependencies": {
-    "@prisma/client": "latest",
+    "@prisma/client": "6.16.2",
     "bcryptjs": "latest",
     "googleapis": "latest",
     "jsonwebtoken": "latest",
@@ -24,14 +23,12 @@
     "zod": "latest"
   },
   "devDependencies": {
-    "@types/bcryptjs": "latest",
-    "@types/jsonwebtoken": "latest",
     "@types/node": "latest",
     "@types/react": "18.2.79",
     "@types/react-dom": "18.2.25",
     "autoprefixer": "latest",
     "postcss": "latest",
-    "prisma": "latest",
+    "prisma": "6.16.2",
     "tailwindcss": "latest",
     "typescript": "latest"
   }
