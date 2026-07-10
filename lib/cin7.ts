@@ -1,87 +1,151 @@
 import { prisma } from '@/lib/db';
 import { decrypt } from '@/lib/crypto';
 
+type Cin7Product = {
+  ID?: string;
+  Id?: string;
+  SKU?: string;
+  Code?: string;
+  Name?: string;
+  ProductName?: string;
+  Barcode?: string;
+  BarCode?: string;
+  UOM?: string;
+  UnitOfMeasure?: string;
+  Status?: string;
+};
+
+type Cin7Customer = {
+  ID?: string;
+  Id?: string;
+  Name?: string;
+  CustomerName?: string;
+  Email?: string;
+  Phone?: string;
+};
+
 async function cin7Fetch(companyId: string, path: string, options: RequestInit = {}) {
-  const conn = await prisma.cin7Connection.findUnique({ where: { companyId } });
-  if (!conn) throw new Error('Cin7 not connected');
-  const res = await fetch(`${conn.baseUrl}${path}`, {
+  const connection = await prisma.cin7Connection.findUnique({ where: { companyId } });
+  if (!connection) throw new Error('Cin7 not connected');
+
+  const extraHeaders = (options.headers || {}) as Record<string, string>;
+
+  const response = await fetch(`${connection.baseUrl}${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
-      'api-auth-accountid': conn.accountId,
-      'api-auth-applicationkey': decrypt(conn.apiKeyEncrypted),
-      ...(options.headers || {})
+      'api-auth-accountid': connection.accountId,
+      'api-auth-applicationkey': decrypt(connection.apiKeyEncrypted),
+      ...extraHeaders
     }
   });
-  const text = await res.text();
-  let data: any = null;
-  try { data = text ? JSON.parse(text) : null; } catch { data = text; }
-  if (!res.ok) throw new Error(`Cin7 API error ${res.status}: ${JSON.stringify(data)}`);
-  return data;
-}
 
+  const text = await response.text();
+  let data: unknown = null;
+
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = text;
+  }
+
+  if (!response.ok) {
+    throw new Error(`Cin7 API error ${response.status}: ${JSON.stringify(data)}`);
+  }
+
+  return data as any;
+}
 
 export async function syncCin7Products(companyId: string) {
   const data = await cin7Fetch(companyId, '/product?Page=1&Limit=1000');
-  const list = data.Products || data.ProductList || data.Product || data.Items || [];
+  const list: Cin7Product[] = data.Products || data.ProductList || data.Product || data.Items || [];
   let count = 0;
-  for (const p of list) {
-    const name = p.Name || p.ProductName || p.name;
-    const cin7Id = p.ID || p.Id || null;
+
+  for (const item of list) {
+    const name = item.Name || item.ProductName;
+    const cin7Id = item.ID || item.Id;
     if (!name || !cin7Id) continue;
+
     await prisma.product.upsert({
       where: { companyId_cin7Id: { companyId, cin7Id } },
       update: {
-        sku: p.SKU || p.Code || null,
+        sku: item.SKU || item.Code || null,
         name,
-        barcode: p.Barcode || p.BarCode || null,
-        uom: p.UOM || p.UnitOfMeasure || null,
-        status: p.Status || null
+        barcode: item.Barcode || item.BarCode || null,
+        uom: item.UOM || item.UnitOfMeasure || null,
+        status: item.Status || null
       },
       create: {
         companyId,
         cin7Id,
-        sku: p.SKU || p.Code || null,
+        sku: item.SKU || item.Code || null,
         name,
-        barcode: p.Barcode || p.BarCode || null,
-        uom: p.UOM || p.UnitOfMeasure || null,
-        status: p.Status || null
+        barcode: item.Barcode || item.BarCode || null,
+        uom: item.UOM || item.UnitOfMeasure || null,
+        status: item.Status || null
       }
     });
-    count++;
+
+    count += 1;
   }
+
   return count;
 }
 
 export async function syncCin7Customers(companyId: string) {
   const data = await cin7Fetch(companyId, '/customer?Page=1&Limit=1000');
-  const list = data.Customers || data.CustomerList || data.Customer || data.Items || [];
+  const list: Cin7Customer[] = data.Customers || data.CustomerList || data.Customer || data.Items || [];
   let count = 0;
-  for (const c of list) {
-    const name = c.Name || c.CustomerName || c.name;
-    const cin7Id = c.ID || c.Id || null;
+
+  for (const item of list) {
+    const name = item.Name || item.CustomerName;
+    const cin7Id = item.ID || item.Id;
     if (!name || !cin7Id) continue;
+
     await prisma.customer.upsert({
       where: { companyId_cin7Id: { companyId, cin7Id } },
-      update: { name, email: c.Email || null, phone: c.Phone || null },
-      create: { companyId, cin7Id, name, email: c.Email || null, phone: c.Phone || null }
+      update: { name, email: item.Email || null, phone: item.Phone || null },
+      create: { companyId, cin7Id, name, email: item.Email || null, phone: item.Phone || null }
     });
-    count++;
+
+    count += 1;
   }
+
   return count;
 }
 
 export async function createCin7Sale(companyId: string, orderId: string) {
   const order = await prisma.order.findUnique({ where: { id: orderId }, include: { lines: true } });
   if (!order) throw new Error('Order not found');
-  const customer = order.customerId ? await prisma.customer.findUnique({ where: { id: order.customerId } }) : null;
+
+  const customer = order.customerId
+    ? await prisma.customer.findUnique({ where: { id: order.customerId } })
+    : null;
+
   const payload = {
     Customer: customer?.name || order.customerText || 'Unknown Customer',
     CustomerReference: order.poNumber || order.subject || order.id,
     Status: 'DRAFT',
-    Lines: order.lines.map(l => ({ SKU: l.sku, Name: l.productName || l.rawProductText, Quantity: l.quantity, Price: 0 }))
+    Lines: order.lines.map((line) => ({
+      SKU: line.sku,
+      Name: line.productName || line.rawProductText,
+      Quantity: line.quantity,
+      Price: 0
+    }))
   };
-  const data = await cin7Fetch(companyId, '/sale', { method: 'POST', body: JSON.stringify(payload) });
-  await prisma.order.update({ where: { id: orderId }, data: { status: 'CREATED', cin7SaleId: data.ID || data.SaleID || data.id || JSON.stringify(data).slice(0,100) } });
+
+  const data = await cin7Fetch(companyId, '/sale', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+
+  await prisma.order.update({
+    where: { id: orderId },
+    data: {
+      status: 'CREATED',
+      cin7SaleId: data.ID || data.SaleID || data.id || JSON.stringify(data).slice(0, 100)
+    }
+  });
+
   return data;
 }

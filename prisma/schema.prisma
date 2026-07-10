@@ -91,6 +91,7 @@ model Product {
   status    String?
   updatedAt DateTime @updatedAt
 
+  @@unique([companyId, cin7Id])
   @@index([companyId, sku])
   @@index([companyId, name])
 }
@@ -105,6 +106,7 @@ model Customer {
   phone     String?
   updatedAt DateTime @updatedAt
 
+  @@unique([companyId, cin7Id])
   @@index([companyId, name])
 }
 

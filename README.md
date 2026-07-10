@@ -1,44 +1,35 @@
-# Cin7 AI Order Assistant MVP
+# Cin7 AI Order Assistant - Fixed MVP
 
-This is a central SaaS MVP owned by you. Each client creates an account, adds their Cin7 API details, syncs products/customers, and processes customer email orders into reviewed Cin7 draft sales orders.
+This is a central SaaS MVP where each client can register, add their own Cin7 API credentials, sync products/customers, paste an order email, review AI-matched lines, and create a draft sale in Cin7.
 
-## What is included
-- Multi-company signup/login
-- Cin7 API credential storage with encryption
-- Product/customer sync from Cin7
-- AI order extraction from pasted email text
-- Product matching against synced Cin7 products
-- Order review screen
-- Create draft sale in Cin7
-- Outlook and Gmail OAuth starter routes
+## Deployment variables required in Vercel
 
-## Important
-Start with manual pasted email testing first. Once Cin7 order creation works, enable Outlook/Gmail polling/webhooks.
+- DATABASE_URL
+- DIRECT_URL
+- JWT_SECRET
+- ENCRYPTION_KEY
+- OPENAI_API_KEY
+- OPENAI_MODEL
 
-## Local setup
-1. Copy `.env.example` to `.env`
-2. Add `DATABASE_URL`, `JWT_SECRET`, `ENCRYPTION_KEY`, `OPENAI_API_KEY`
-3. Run:
+## Deploy flow
+
+1. Replace the old project files with this fixed folder.
+2. Push to GitHub.
+3. Vercel will run:
 
 ```bash
-npm install
-npx prisma generate
-npx prisma migrate dev --name init
-npm run dev
+prisma generate && prisma migrate deploy && next build
 ```
 
-Open http://localhost:3000
+4. The included migration creates the database tables automatically.
 
-## Deployment summary
-- Database: Supabase free Postgres
-- App: Vercel free hosting
-- AI: OpenAI API key
-- Email OAuth: Microsoft Azure App Registration and/or Google Cloud OAuth
+## MVP test flow
 
-## MVP flow
-1. Register company
-2. Save Cin7 Account ID and API Key
-3. Sync products/customers
-4. Paste customer order email in Test Email Order
-5. Review AI matched lines
-6. Click Create Draft Sale in Cin7
+1. Register account.
+2. Go to Settings.
+3. Save Cin7 Account ID and API Key.
+4. Click Sync products/customers.
+5. Go to Test Email Order.
+6. Paste an email order.
+7. Review extracted lines.
+8. Click Create Draft Sale in Cin7.

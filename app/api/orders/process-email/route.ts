@@ -1,5 +1,49 @@
-import { NextResponse } from 'next/server';import { requireSession } from '@/lib/auth';import { prisma } from '@/lib/db';import { extractOrderWithAI, matchProduct } from '@/lib/ai';
-export async function POST(req:Request){const s=await requireSession();const b=await req.json();const extracted=await extractOrderWithAI(b.text);let customer=null;if(extracted.customerText){customer=await prisma.customer.findFirst({where:{companyId:s.companyId,name:{contains:extracted.customerText,mode:'insensitive'}}});}
-const order=await prisma.order.create({data:{companyId:s.companyId,source:b.source||'email',originalText:b.text,customerText:extracted.customerText||null,customerId:customer?.id,poNumber:extracted.poNumber||null,status:'NEEDS_REVIEW'}});
-for(const line of (extracted.lines||[])){const m=await matchProduct(s.companyId,line.rawProductText,customer?.id);const confidence=m.confidence||0;await prisma.orderLine.create({data:{orderId:order.id,rawProductText:line.rawProductText,quantity:Number(line.quantity||1),uom:line.uom||null,productId:confidence>=0.7?m.product?.id:null,productName:confidence>=0.7?m.product?.name:null,sku:confidence>=0.7?m.product?.sku:null,confidence,status:confidence>=0.85?'MATCHED':confidence>=0.7?'NEEDS_REVIEW':'UNMATCHED'}})}
-return NextResponse.json({id:order.id});}
+import { NextResponse } from 'next/server';
+import { requireSession } from '@/lib/auth';
+import { prisma } from '@/lib/db';
+import { extractOrderWithAI, matchProduct } from '@/lib/ai';
+
+export async function POST(request: Request) {
+  const session = requireSession();
+  const body = await request.json();
+  const extracted = await extractOrderWithAI(body.text || '');
+
+  const customer = extracted.customerText
+    ? await prisma.customer.findFirst({
+        where: { companyId: session.companyId, name: { contains: extracted.customerText, mode: 'insensitive' } }
+      })
+    : null;
+
+  const order = await prisma.order.create({
+    data: {
+      companyId: session.companyId,
+      source: body.source || 'email',
+      originalText: body.text || '',
+      customerText: extracted.customerText || null,
+      customerId: customer?.id || null,
+      poNumber: extracted.poNumber || null,
+      status: 'NEEDS_REVIEW'
+    }
+  });
+
+  for (const line of extracted.lines) {
+    const match = await matchProduct(session.companyId, line.rawProductText, customer?.id);
+    const confidence = match.confidence || 0;
+
+    await prisma.orderLine.create({
+      data: {
+        orderId: order.id,
+        rawProductText: line.rawProductText,
+        quantity: Number(line.quantity || 1),
+        uom: line.uom || null,
+        productId: confidence >= 0.7 ? match.product?.id || null : null,
+        productName: confidence >= 0.7 ? match.product?.name || null : null,
+        sku: confidence >= 0.7 ? match.product?.sku || null : null,
+        confidence,
+        status: confidence >= 0.85 ? 'MATCHED' : confidence >= 0.7 ? 'NEEDS_REVIEW' : 'UNMATCHED'
+      }
+    });
+  }
+
+  return NextResponse.json({ id: order.id });
+}

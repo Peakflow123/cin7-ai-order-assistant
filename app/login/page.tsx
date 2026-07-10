@@ -1,3 +1,27 @@
 'use client';
+
 import { useState } from 'react';
-export default function Login(){const[form,setForm]=useState({email:'',password:''});const[msg,setMsg]=useState('');async function submit(e:any){e.preventDefault();const r=await fetch('/api/auth/login',{method:'POST',body:JSON.stringify(form)});if(r.ok) location.href='/dashboard'; else setMsg(await r.text());}return <main className="min-h-screen flex items-center justify-center p-6"><form onSubmit={submit} className="card w-full max-w-md space-y-3"><h1 className="text-2xl font-bold">Login</h1><input className="input" placeholder="Email" onChange={e=>setForm({...form,email:e.target.value})}/><input className="input" type="password" placeholder="Password" onChange={e=>setForm({...form,password:e.target.value})}/><button className="btn w-full">Login</button><p className="text-red-600">{msg}</p></form></main>}
+
+export default function Login() {
+  const [form, setForm] = useState({ email: '', password: '' });
+  const [message, setMessage] = useState('');
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const response = await fetch('/api/auth/login', { method: 'POST', body: JSON.stringify(form) });
+    if (response.ok) window.location.href = '/dashboard';
+    else setMessage(await response.text());
+  }
+
+  return (
+    <main className="min-h-screen flex items-center justify-center p-6">
+      <form onSubmit={submit} className="card w-full max-w-md space-y-3">
+        <h1 className="text-2xl font-bold">Login</h1>
+        <input className="input" placeholder="Email" onChange={(e) => setForm({ ...form, email: e.target.value })} />
+        <input className="input" type="password" placeholder="Password" onChange={(e) => setForm({ ...form, password: e.target.value })} />
+        <button className="btn w-full">Login</button>
+        <p className="text-red-600">{message}</p>
+      </form>
+    </main>
+  );
+}
