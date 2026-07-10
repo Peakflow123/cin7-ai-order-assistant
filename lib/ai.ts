@@ -1,4 +1,4 @@
-import OpenAI from 'openai';
+import Groq from 'groq-sdk';
 import { prisma } from '@/lib/db';
 
 export type ExtractedOrderLine = {
@@ -14,15 +14,48 @@ export type ExtractedOrder = {
 };
 
 export async function extractOrderWithAI(text: string): Promise<ExtractedOrder> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error('OPENAI_API_KEY missing');
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) throw new Error('GROQ_API_KEY missing');
 
-  const client = new OpenAI({ apiKey });
-  const prompt = `Extract a B2B purchase order from this email. Return only valid JSON with keys: customerText, poNumber, lines. Each line must contain rawProductText, quantity, uom. If unknown, use null. Email:\n${text}`;
+  const groq = new Groq({ apiKey });
 
-  const result = await client.chat.completions.create({
-    model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-    messages: [{ role: 'user', content: prompt }],
+  const prompt = `
+You are an AI order extraction assistant for Cin7 Core.
+
+Extract a B2B customer purchase order from the email text below.
+Return ONLY valid JSON. Do not add explanation. Do not use markdown.
+
+Required JSON format:
+{
+  "customerText": "customer name if found, otherwise null",
+  "poNumber": "PO/reference number if found, otherwise null",
+  "lines": [
+    {
+      "rawProductText": "product text exactly as customer wrote it",
+      "quantity": 1,
+      "uom": "unit of measure if found, otherwise null"
+    }
+  ]
+}
+
+Rules:
+- Do not invent products.
+- If quantity is missing, use 1.
+- If no order lines are found, return an empty lines array.
+- Keep rawProductText simple and clean.
+
+Email text:
+${text}
+`;
+
+  const result = await groq.chat.completions.create({
+    model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+    messages: [
+      {
+        role: 'user',
+        content: prompt
+      }
+    ],
     temperature: 0
   });
 
@@ -53,7 +86,11 @@ export async function matchProduct(companyId: string, rawText: string, customerI
   const normalizedRawText = rawText.toLowerCase().trim();
 
   const alias = await prisma.productAlias.findFirst({
-    where: { companyId, customerId: customerId || null, rawText: normalizedRawText }
+    where: {
+      companyId,
+      customerId: customerId || null,
+      rawText: normalizedRawText
+    }
   });
 
   if (alias) {
@@ -61,7 +98,11 @@ export async function matchProduct(companyId: string, rawText: string, customerI
     if (product) return { product, confidence: 0.99 };
   }
 
-  const products = await prisma.product.findMany({ where: { companyId }, take: 3000 });
+  const products = await prisma.product.findMany({
+    where: { companyId },
+    take: 3000
+  });
+
   let bestProduct = null as (typeof products)[number] | null;
   let bestScore = 0;
 
@@ -73,5 +114,8 @@ export async function matchProduct(companyId: string, rawText: string, customerI
     }
   }
 
-  return { product: bestProduct, confidence: bestScore };
+  return {
+    product: bestProduct,
+    confidence: bestScore
+  };
 }
