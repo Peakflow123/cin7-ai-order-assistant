@@ -1,134 +1,155 @@
-generator client { provider = "prisma-client-js" }
-datasource db { provider = "postgresql" url = env("DATABASE_URL") }
+generator client {
+  provider = "prisma-client-js"
+}
 
-enum OrderStatus { NEW NEEDS_REVIEW READY CREATED ERROR }
-enum LineStatus { MATCHED NEEDS_REVIEW UNMATCHED }
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum OrderStatus {
+  NEW
+  NEEDS_REVIEW
+  READY
+  CREATED
+  ERROR
+}
+
+enum LineStatus {
+  MATCHED
+  NEEDS_REVIEW
+  UNMATCHED
+}
 
 model Company {
-  id String @id @default(cuid())
-  name String
+  id        String   @id @default(cuid())
+  name      String
   createdAt DateTime @default(now())
-  users User[]
-  cin7 Cin7Connection?
-  outlook OutlookConnection?
-  gmail GmailConnection?
-  products Product[]
+
+  users     User[]
+  cin7      Cin7Connection?
+  outlook   OutlookConnection?
+  gmail     GmailConnection?
+  products  Product[]
   customers Customer[]
-  aliases ProductAlias[]
-  orders Order[]
+  aliases   ProductAlias[]
+  orders    Order[]
 }
 
 model User {
-  id String @id @default(cuid())
-  email String @unique
+  id           String   @id @default(cuid())
+  email        String   @unique
   passwordHash String
-  name String?
-  companyId String
-  company Company @relation(fields: [companyId], references: [id])
-  createdAt DateTime @default(now())
+  name         String?
+  companyId    String
+  company      Company  @relation(fields: [companyId], references: [id])
+  createdAt    DateTime @default(now())
 }
 
 model Cin7Connection {
-  id String @id @default(cuid())
-  companyId String @unique
-  company Company @relation(fields: [companyId], references: [id])
-  accountId String
+  id              String   @id @default(cuid())
+  companyId       String   @unique
+  company         Company  @relation(fields: [companyId], references: [id])
+  accountId       String
   apiKeyEncrypted String
-  baseUrl String @default("https://inventory.dearsystems.com/ExternalApi/v2")
-  updatedAt DateTime @updatedAt
+  baseUrl         String   @default("https://inventory.dearsystems.com/ExternalApi/v2")
+  updatedAt       DateTime @updatedAt
 }
 
 model OutlookConnection {
-  id String @id @default(cuid())
-  companyId String @unique
-  company Company @relation(fields: [companyId], references: [id])
-  email String?
-  accessTokenEncrypted String
+  id                    String    @id @default(cuid())
+  companyId             String    @unique
+  company               Company   @relation(fields: [companyId], references: [id])
+  email                 String?
+  accessTokenEncrypted  String
   refreshTokenEncrypted String
-  expiresAt DateTime?
-  updatedAt DateTime @updatedAt
+  expiresAt             DateTime?
+  updatedAt             DateTime  @updatedAt
 }
 
 model GmailConnection {
-  id String @id @default(cuid())
-  companyId String @unique
-  company Company @relation(fields: [companyId], references: [id])
-  email String?
-  accessTokenEncrypted String
+  id                    String   @id @default(cuid())
+  companyId             String   @unique
+  company               Company  @relation(fields: [companyId], references: [id])
+  email                 String?
+  accessTokenEncrypted  String
   refreshTokenEncrypted String
-  expiryDate BigInt?
-  updatedAt DateTime @updatedAt
+  expiryDate            BigInt?
+  updatedAt             DateTime @updatedAt
 }
 
 model Product {
-  id String @id @default(cuid())
+  id        String   @id @default(cuid())
   companyId String
-  company Company @relation(fields: [companyId], references: [id])
-  cin7Id String?
-  sku String?
-  name String
-  barcode String?
-  uom String?
-  status String?
+  company   Company  @relation(fields: [companyId], references: [id])
+  cin7Id    String?
+  sku       String?
+  name      String
+  barcode   String?
+  uom       String?
+  status    String?
   updatedAt DateTime @updatedAt
+
   @@index([companyId, sku])
   @@index([companyId, name])
-  @@unique([companyId, cin7Id])
 }
 
 model Customer {
-  id String @id @default(cuid())
+  id        String   @id @default(cuid())
   companyId String
-  company Company @relation(fields: [companyId], references: [id])
-  cin7Id String?
-  name String
-  email String?
-  phone String?
+  company   Company  @relation(fields: [companyId], references: [id])
+  cin7Id    String?
+  name      String
+  email     String?
+  phone     String?
   updatedAt DateTime @updatedAt
+
   @@index([companyId, name])
-  @@unique([companyId, cin7Id])
 }
 
 model ProductAlias {
-  id String @id @default(cuid())
-  companyId String
-  company Company @relation(fields: [companyId], references: [id])
+  id         String   @id @default(cuid())
+  companyId  String
+  company    Company  @relation(fields: [companyId], references: [id])
   customerId String?
-  rawText String
-  productId String
-  createdAt DateTime @default(now())
+  rawText    String
+  productId  String
+  createdAt  DateTime @default(now())
+
   @@unique([companyId, customerId, rawText])
 }
 
 model Order {
-  id String @id @default(cuid())
-  companyId String
-  company Company @relation(fields: [companyId], references: [id])
-  source String
+  id              String      @id @default(cuid())
+  companyId       String
+  company         Company     @relation(fields: [companyId], references: [id])
+  source          String
   sourceMessageId String?
-  sender String?
-  subject String?
-  originalText String
-  customerText String?
-  customerId String?
-  poNumber String?
-  status OrderStatus @default(NEW)
-  cin7SaleId String?
-  error String?
-  createdAt DateTime @default(now())
-  lines OrderLine[]
+  sender          String?
+  subject         String?
+  originalText    String
+  customerText    String?
+  customerId      String?
+  poNumber        String?
+  status          OrderStatus @default(NEW)
+  cin7SaleId      String?
+  error           String?
+  createdAt       DateTime    @default(now())
+
+  lines           OrderLine[]
 }
 
 model OrderLine {
-  id String @id @default(cuid())
-  orderId String
-  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  id             String     @id @default(cuid())
+  orderId        String
+  order          Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
   rawProductText String
-  productId String?
-  productName String?
-  sku String?
-  quantity Float
-  uom String?
-  confidence Float @default(0)
-  status LineStatus @default(UNMATCHED)
+  productId      String?
+  productName    String?
+  sku            String?
+  quantity       Float
+  uom            String?
+  confidence     Float      @default(0)
+  status         LineStatus @default(UNMATCHED)
 }
