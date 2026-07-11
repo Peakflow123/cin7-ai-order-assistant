@@ -24,6 +24,15 @@ type Cin7Customer = {
   Phone?: string;
 };
 
+type Cin7Address = {
+  Line1: string;
+  Line2?: string;
+  City?: string;
+  State?: string;
+  Postcode?: string;
+  Country?: string;
+};
+
 type SaleLineInput = {
   ProductID: string | null;
   SKU: string;
@@ -95,6 +104,16 @@ function unwrapProductDetails(productDetails: any) {
   );
 }
 
+function unwrapCustomerDetails(customerDetails: any) {
+  return (
+    customerDetails?.Customers?.[0] ||
+    customerDetails?.CustomerList?.[0] ||
+    customerDetails?.Customer?.[0] ||
+    customerDetails?.Customer ||
+    customerDetails
+  );
+}
+
 function getObjectPaths(source: any, prefix = '', depth = 0): Array<{ path: string; value: any }> {
   if (!source || typeof source !== 'object' || depth > 4) return [];
 
@@ -113,19 +132,105 @@ function getObjectPaths(source: any, prefix = '', depth = 0): Array<{ path: stri
   return paths;
 }
 
+function compactAddress(address: Cin7Address | null) {
+  if (!address) return null;
+  const line1 = String(address.Line1 || '').trim();
+  const line2 = String(address.Line2 || '').trim();
+  const city = String(address.City || '').trim();
+  const state = String(address.State || '').trim();
+  const postcode = String(address.Postcode || '').trim();
+  const country = String(address.Country || '').trim();
+
+  if (!line1 && !line2 && !city && !state && !postcode && !country) return null;
+
+  return {
+    Line1: line1,
+    Line2: line2,
+    City: city,
+    State: state,
+    Postcode: postcode,
+    Country: country
+  };
+}
+
+function mapAddress(raw: any): Cin7Address | null {
+  if (!raw || typeof raw !== 'object') return null;
+
+  const line1 = raw.Line1 || raw.AddressLine1 || raw.BillingAddressLine1 || raw.ShippingAddressLine1 || raw.Street || raw.Address1 || raw.DisplayAddressLine1;
+  const line2 = raw.Line2 || raw.AddressLine2 || raw.BillingAddressLine2 || raw.ShippingAddressLine2 || raw.Address2 || raw.DisplayAddressLine2;
+  const city = raw.City || raw.Suburb || raw.Town;
+  const state = raw.State || raw.Region || raw.Province;
+  const postcode = raw.Postcode || raw.PostCode || raw.Zip || raw.ZipCode || raw.PostalCode;
+  const country = raw.Country || raw.CountryCode;
+
+  return compactAddress({
+    Line1: String(line1 || ''),
+    Line2: String(line2 || ''),
+    City: String(city || ''),
+    State: String(state || ''),
+    Postcode: String(postcode || ''),
+    Country: String(country || '')
+  });
+}
+
+function findCustomerAddress(customerDetails: any, type: 'billing' | 'shipping') {
+  const customer = unwrapCustomerDetails(customerDetails);
+  if (!customer) return null;
+
+  const directCandidates = type === 'billing'
+    ? [customer.BillingAddress, customer.BillTo, customer.Billing, customer.DefaultBillingAddress]
+    : [customer.ShippingAddress, customer.ShipTo, customer.Shipping, customer.DefaultShippingAddress];
+
+  for (const candidate of directCandidates) {
+    const mapped = mapAddress(candidate);
+    if (mapped) return mapped;
+  }
+
+  const arrays = [
+    customer.Addresses,
+    customer.AddressList,
+    customer.CustomerAddresses,
+    customer.ShippingAddresses,
+    customer.BillingAddresses
+  ];
+
+  for (const arr of arrays) {
+    if (!Array.isArray(arr)) continue;
+
+    const preferred = arr.find((address: any) => {
+      const addressType = normalize(address.Type || address.AddressType || address.Description || address.Name || address.Label);
+      const isDefault = Boolean(address.Default || address.IsDefault || address.DefaultForType || address.IsPrimary);
+      if (type === 'billing') return addressType.includes('billing') || addressType.includes('bill') || isDefault;
+      return addressType.includes('shipping') || addressType.includes('ship') || isDefault;
+    });
+
+    const mappedPreferred = mapAddress(preferred);
+    if (mappedPreferred) return mappedPreferred;
+
+    const mappedFirst = mapAddress(arr[0]);
+    if (mappedFirst) return mappedFirst;
+  }
+
+  return null;
+}
+
+async function getCustomerDetails(companyId: string, customerCin7Id: string | null | undefined) {
+  if (!customerCin7Id) return null;
+
+  try {
+    const customerDetails = await cin7Fetch(companyId, `/customer?ID=${encodeURIComponent(customerCin7Id)}`);
+    return unwrapCustomerDetails(customerDetails);
+  } catch {
+    return null;
+  }
+}
+
 function findPriceByCustomerTier(productDetails: any, customerPriceTier: string | null) {
   const product = unwrapProductDetails(productDetails);
   const tierName = customerPriceTier || '';
   const normalizedTier = normalize(tierName);
 
   if (!product) return NaN;
-
-  /*
-    Cin7 Core has up to 10 price points per product. Customers are assigned a price tier,
-    and the sale order price tier/customer price tier determines which product price to use.
-    This resolver intentionally searches many possible API response shapes because Cin7/API
-    responses can expose price tiers as arrays, objects, or numbered fields depending on endpoint/version.
-  */
 
   const possibleArrays = [
     product.PriceTiers,
@@ -189,7 +294,6 @@ function findPriceByCustomerTier(productDetails: any, customerPriceTier: string 
 
   const allPaths = getObjectPaths(product);
 
-  /* Match direct field names like Retail, RetailPrice, Retail_Price, Retail Price, etc. */
   for (const entry of allPaths) {
     const pathName = normalize(entry.path);
     const price = toNumber(entry.value);
@@ -200,7 +304,6 @@ function findPriceByCustomerTier(productDetails: any, customerPriceTier: string 
     }
   }
 
-  /* If tier is explicitly numeric, e.g. Price Tier 3, use PriceTier3. */
   const tierNumberMatch = String(tierName).match(/(\d+)/);
   if (tierNumberMatch) {
     const tierNumber = tierNumberMatch[1];
@@ -218,7 +321,6 @@ function findPriceByCustomerTier(productDetails: any, customerPriceTier: string 
     }
   }
 
-  /* Last resort: if the product response exposes numbered price fields, return the first non-zero price. */
   for (let i = 1; i <= 10; i += 1) {
     const candidates = [
       product[`PriceTier${i}`],
@@ -249,7 +351,7 @@ async function getProductPrice(companyId: string, productCin7Id: string | null, 
     const product = unwrapProductDetails(productDetails);
     const keys = product && typeof product === 'object' ? Object.keys(product).slice(0, 80) : [];
     throw new Error(
-      `Could not find product price for customer price tier "${customerPriceTier}". ProductID: ${productCin7Id}. Product response keys: ${JSON.stringify(keys)}. Please send the GET /product response so the exact Cin7 price field can be mapped.`
+      `Could not find product price for customer price tier "${customerPriceTier}". ProductID: ${productCin7Id}. Product response keys: ${JSON.stringify(keys)}.`
     );
   }
 
@@ -336,6 +438,10 @@ export async function createCin7Sale(companyId: string, orderId: string) {
     ? await prisma.customer.findUnique({ where: { id: order.customerId } })
     : null;
 
+  const customerDetails = await getCustomerDetails(companyId, customer?.cin7Id);
+  const billingAddress = compactAddress(findCustomerAddress(customerDetails, 'billing'));
+  const shippingAddress = compactAddress(findCustomerAddress(customerDetails, 'shipping'));
+
   const matchedProducts = [];
 
   for (const line of order.lines) {
@@ -351,9 +457,12 @@ export async function createCin7Sale(companyId: string, orderId: string) {
     throw new Error('No matched product lines found. Please make sure order lines are matched before creating Cin7 sale.');
   }
 
-  const saleHeaderPayload = {
+  const saleHeaderPayload: any = {
     CustomerID: customer?.cin7Id || undefined,
     Customer: customer?.name || order.customerText || 'Unknown Customer',
+    Contact: customerDetails?.Contact || customerDetails?.DefaultContact || undefined,
+    Phone: customerDetails?.Phone || customer?.phone || undefined,
+    Email: customerDetails?.Email || customer?.email || undefined,
     CustomerReference: order.poNumber || order.subject || order.id,
     OrderStatus: 'NOTAUTHORISED',
     InvoiceStatus: 'NOTAUTHORISED',
@@ -361,6 +470,9 @@ export async function createCin7Sale(companyId: string, orderId: string) {
     CurrencyRate: 1,
     Note: `Created by AI Order Assistant from ${order.source}`
   };
+
+  if (billingAddress) saleHeaderPayload.BillingAddress = billingAddress;
+  if (shippingAddress) saleHeaderPayload.ShippingAddress = shippingAddress;
 
   const sale = await cin7Fetch(companyId, '/sale', {
     method: 'POST',
@@ -427,6 +539,8 @@ export async function createCin7Sale(companyId: string, orderId: string) {
 
   console.log('Cin7 Sale Header Payload:', JSON.stringify(saleHeaderPayload));
   console.log('Customer price tier from Cin7 sale:', customerPriceTier);
+  console.log('Billing address mapped:', JSON.stringify(billingAddress));
+  console.log('Shipping address mapped:', JSON.stringify(shippingAddress));
   console.log('Cin7 Sale Order Payload:', JSON.stringify(saleOrderPayload));
 
   const saleOrder = await cin7Fetch(companyId, '/sale/order', {
