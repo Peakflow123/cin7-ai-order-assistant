@@ -12,14 +12,9 @@ export default async function AdminPage() {
     orderBy: { createdAt: 'desc' },
     include: {
       users: true,
+      cin7: true,
       _count: {
-        select: {
-          products: true,
-          customers: true,
-          orders: true,
-          aliases: true,
-          customerAliases: true
-        }
+        select: { products: true, customers: true, orders: true, aliases: true, customerAliases: true }
       }
     }
   });
@@ -38,7 +33,8 @@ export default async function AdminPage() {
               <div>
                 <h2 className="text-xl font-bold">{company.name}</h2>
                 <p className="text-slate-500 text-sm">Company ID: {company.id}</p>
-                <p className="text-slate-500 text-sm">Created: {company.createdAt.toLocaleString()}</p>
+                <p className="text-slate-500 text-sm">Cin7: {company.cin7 ? 'Connected' : 'Not connected'}</p>
+                <p className="text-slate-500 text-sm">Auto-create: {company.autoCreateEnabled ? `Yes, ${company.autoCreateThreshold * 100}%+` : 'No'}</p>
               </div>
               <div className="text-right text-sm">
                 <p><b>Users:</b> {company.users.length}</p>
@@ -47,15 +43,8 @@ export default async function AdminPage() {
                 <p><b>Customers:</b> {company._count.customers}</p>
                 <p><b>Product aliases:</b> {company._count.aliases}</p>
                 <p><b>Customer aliases:</b> {company._count.customerAliases}</p>
+                <Link className="btn inline-block mt-3" href={`/admin/clients/${company.id}`}>Manage Client</Link>
               </div>
-            </div>
-            <div className="mt-4 border-t pt-3">
-              <b>Users</b>
-              <ul className="list-disc ml-6 mt-2">
-                {company.users.map((user) => (
-                  <li key={user.id}>{user.email} - {user.role}</li>
-                ))}
-              </ul>
             </div>
           </div>
         ))}

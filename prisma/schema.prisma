@@ -27,6 +27,10 @@ model Company {
   name      String
   createdAt DateTime @default(now())
 
+  allowClientCin7Edit Boolean @default(false)
+  autoCreateEnabled   Boolean @default(true)
+  autoCreateThreshold Float   @default(0.9)
+
   users           User[]
   cin7            Cin7Connection?
   outlook         OutlookConnection?
