@@ -56,29 +56,31 @@ async function parseAttachmentBuffer(filename: string, mimeType: string, buffer:
     if (lowerMime.includes('pdf') || lowerName.endsWith('.pdf')) {
       const pdfParse = (await import('pdf-parse')).default;
       const parsed = await pdfParse(buffer);
-      return sanitizeText(parsed.text || '');
+      return sanitizeText(parsed.text || '', 9000);
     }
 
     if (lowerName.endsWith('.docx') || lowerMime.includes('wordprocessingml')) {
       const mammoth = await import('mammoth');
       const parsed = await mammoth.extractRawText({ buffer });
-      return sanitizeText(parsed.value || '');
+      return sanitizeText(parsed.value || '', 9000);
     }
 
     if (lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls') || lowerMime.includes('spreadsheet')) {
       const XLSX = await import('xlsx');
       const workbook = XLSX.read(buffer, { type: 'buffer' });
       const parts: string[] = [];
-      for (const sheetName of workbook.SheetNames.slice(0, 5)) {
+
+      for (const sheetName of workbook.SheetNames.slice(0, 3)) {
         const sheet = workbook.Sheets[sheetName];
         const csv = XLSX.utils.sheet_to_csv(sheet);
         parts.push(`Sheet: ${sheetName}\n${csv}`);
       }
-      return sanitizeText(parts.join('\n\n'), 15000);
+
+      return sanitizeText(parts.join('\n\n'), 10000);
     }
 
     if (lowerName.endsWith('.txt') || lowerName.endsWith('.csv') || lowerMime.startsWith('text/')) {
-      return sanitizeText(buffer.toString('utf8'), 12000);
+      return sanitizeText(buffer.toString('utf8'), 9000);
     }
 
     if (lowerMime.startsWith('image/') || ['.png', '.jpg', '.jpeg', '.webp'].some((ext) => lowerName.endsWith(ext))) {
@@ -96,6 +98,7 @@ export async function getGmailClient(connectionId: string, companyId: string) {
   if (!connection) throw new Error('Gmail connection not found or inactive.');
 
   const oauth2 = new google.auth.OAuth2(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET, process.env.GOOGLE_REDIRECT_URI);
+
   oauth2.setCredentials({
     access_token: decrypt(connection.accessTokenEncrypted),
     refresh_token: decrypt(connection.refreshTokenEncrypted),
@@ -113,13 +116,27 @@ export async function getGmailClient(connectionId: string, companyId: string) {
   return { gmail: google.gmail({ version: 'v1', auth: oauth2 }), connection };
 }
 
-function collectParts(payload: any) {
+function collectMetadataAttachmentNames(payload: any) {
+  const attachmentNames: string[] = [];
+
+  function walk(part: any) {
+    if (!part) return;
+    if (part.filename) attachmentNames.push(String(part.filename));
+    for (const child of part.parts || []) walk(child);
+  }
+
+  walk(payload);
+  return attachmentNames;
+}
+
+function collectFullParts(payload: any) {
   const plainParts: string[] = [];
   const htmlParts: string[] = [];
   const attachments: Array<{ filename: string; mimeType: string; attachmentId: string }> = [];
 
   function walk(part: any) {
     if (!part) return;
+
     const filename = String(part.filename || '').trim();
     const mimeType = String(part.mimeType || '').toLowerCase();
     const bodyData = part.body?.data;
@@ -145,18 +162,18 @@ export async function getGmailMessageText(connectionId: string, companyId: strin
   const from = getHeader(headers, 'From');
   const subject = getHeader(headers, 'Subject') || '(No subject)';
   const date = getHeader(headers, 'Date');
-  const collected = collectParts(message.payload);
+  const collected = collectFullParts(message.payload);
   const attachmentTexts: string[] = [];
 
-  for (const attachment of collected.attachments.slice(0, 8)) {
+  for (const attachment of collected.attachments.slice(0, 5)) {
     const attachmentResponse = await gmail.users.messages.attachments.get({ userId: 'me', messageId, id: attachment.attachmentId });
     const buffer = decodeBase64Url(attachmentResponse.data.data);
     const text = await parseAttachmentBuffer(attachment.filename, attachment.mimeType, buffer);
     attachmentTexts.push(`Attachment: ${attachment.filename}\n${text}`);
   }
 
-  const bodyText = sanitizeText(collected.text || message.snippet || '', 12000);
-  const fullText = [bodyText, ...attachmentTexts].filter(Boolean).join('\n\n---\n\n');
+  const bodyText = sanitizeText(collected.text || message.snippet || '', 9000);
+  const fullText = [bodyText, ...attachmentTexts].filter(Boolean).join('\n\n---\n\n').slice(0, 16000);
 
   return {
     connection,
@@ -170,30 +187,56 @@ export async function getGmailMessageText(connectionId: string, companyId: strin
   };
 }
 
-export async function listRecentGmailMessages(connectionId: string, companyId: string, maxResults = 10, onlyOrderRelated = true) {
+export async function listRecentGmailMessages(connectionId: string, companyId: string, maxResults = 5, onlyOrderRelated = true) {
   const { gmail } = await getGmailClient(connectionId, companyId);
-  const listResponse = await gmail.users.messages.list({ userId: 'me', maxResults, q: 'newer_than:14d -in:spam -in:trash' });
+
+  const listResponse = await gmail.users.messages.list({
+    userId: 'me',
+    maxResults,
+    q: 'newer_than:14d -in:spam -in:trash'
+  });
+
   const messages = listResponse.data.messages || [];
   const summaries: GmailMessageSummary[] = [];
 
   for (const item of messages) {
     if (!item.id) continue;
-    const full = await getGmailMessageText(connectionId, companyId, item.id);
-    const sourceMessageId = `gmail:${connectionId}:${full.messageId}`;
+
+    const response = await gmail.users.messages.get({
+      userId: 'me',
+      id: item.id,
+      format: 'metadata',
+      metadataHeaders: ['From', 'Subject', 'Date']
+    });
+
+    const message = response.data;
+    const headers = message.payload?.headers || [];
+    const from = getHeader(headers, 'From');
+    const subject = getHeader(headers, 'Subject') || '(No subject)';
+    const date = getHeader(headers, 'Date');
+    const attachmentNames = collectMetadataAttachmentNames(message.payload);
+    const sourceMessageId = `gmail:${connectionId}:${message.id}`;
+
     const existingOrder = await prisma.order.findFirst({ where: { companyId, sourceMessageId }, select: { id: true } });
-    const classification = await classifyEmailForOrder({ subject: full.subject, from: full.from, bodyText: full.bodyText });
+
+    const classification = await classifyEmailForOrder({
+      subject,
+      from,
+      snippet: message.snippet || '',
+      attachmentNames
+    });
 
     if (onlyOrderRelated && classification.category === 'NOT_ORDER' && classification.confidence >= 0.7) continue;
 
     summaries.push({
-      id: full.messageId,
-      threadId: full.threadId,
-      from: full.from,
-      subject: full.subject,
-      date: full.date,
-      snippet: sanitizeText(full.bodyText, 350),
-      hasAttachments: full.attachmentNames.length > 0,
-      attachmentNames: full.attachmentNames,
+      id: message.id || item.id,
+      threadId: message.threadId || item.threadId || '',
+      from,
+      subject,
+      date,
+      snippet: message.snippet || '',
+      hasAttachments: attachmentNames.length > 0,
+      attachmentNames,
       alreadyProcessed: Boolean(existingOrder),
       orderId: existingOrder?.id || null,
       classification

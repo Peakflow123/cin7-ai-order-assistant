@@ -33,9 +33,9 @@ export default function GmailInboxClient({ connections }: { connections: GmailCo
   async function loadInbox() {
     if (!selectedConnectionId) return;
     setLoading(true);
-    setStatus('Loading recent Gmail messages and checking which emails look like orders...');
+    setStatus('Loading recent Gmail messages with lightweight AI classification...');
 
-    const response = await fetch(`/api/gmail/inbox?connectionId=${selectedConnectionId}&maxResults=10&includeNonOrders=${includeNonOrders}`);
+    const response = await fetch(`/api/gmail/inbox?connectionId=${selectedConnectionId}&maxResults=5&includeNonOrders=${includeNonOrders}`);
     const data = await response.json();
 
     if (!response.ok) {
@@ -45,13 +45,13 @@ export default function GmailInboxClient({ connections }: { connections: GmailCo
     }
 
     setMessages(data.messages || []);
-    setStatus(`Loaded ${(data.messages || []).length} Gmail messages.`);
+    setStatus(`Loaded ${(data.messages || []).length} Gmail messages. Full attachments are read only when you click Process Email.`);
     setLoading(false);
   }
 
   async function processMessage(messageId: string, force = false) {
     setProcessingId(messageId);
-    setStatus('Processing Gmail message with AI, including supported attachments...');
+    setStatus('Processing full email and supported attachments with AI...');
 
     const response = await fetch('/api/gmail/process', {
       method: 'POST',
@@ -82,7 +82,7 @@ export default function GmailInboxClient({ connections }: { connections: GmailCo
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h2 className="text-xl font-bold">Gmail Inbox Automation Test</h2>
-          <p className="text-sm text-slate-500">Load recent Gmail emails, classify order emails, read supported attachments, and create review orders.</p>
+          <p className="text-sm text-slate-500">List view is now token-optimized. Attachments are parsed only when processing a selected email.</p>
         </div>
         <div className="flex flex-col gap-2 md:flex-row">
           <select className="input md:w-80" value={selectedConnectionId} onChange={(event) => setSelectedConnectionId(event.target.value)}>
