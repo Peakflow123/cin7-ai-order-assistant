@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import bcrypt from 'bcryptjs';
 import { prisma } from '@/lib/db';
-import { signSession } from '@/lib/auth';
+import { isPlatformAdminEmail, signSession } from '@/lib/auth';
 
 export async function POST(request: Request) {
   const body = await request.json();
@@ -12,7 +12,9 @@ export async function POST(request: Request) {
     return new NextResponse('Invalid login', { status: 401 });
   }
 
-  cookies().set('session', signSession({ userId: user.id, companyId: user.companyId, email: user.email }), {
+  const role = user.role === 'PLATFORM_ADMIN' || isPlatformAdminEmail(user.email) ? 'PLATFORM_ADMIN' : user.role;
+
+  cookies().set('session', signSession({ userId: user.id, companyId: user.companyId, email: user.email, role }), {
     httpOnly: true,
     path: '/',
     sameSite: 'lax'
