@@ -24,6 +24,22 @@ type Cin7Customer = {
   Phone?: string;
 };
 
+type SaleLineInput = {
+  ProductID: string | null;
+  SKU: string;
+  Name: string;
+  Quantity: number;
+  Price: number;
+  Discount: number;
+  Tax: number;
+  AverageCost: null;
+  TaxRule: string;
+  Comment: string;
+  DropShip: boolean;
+  BackorderQuantity: null;
+  Total: number;
+};
+
 async function cin7Fetch(companyId: string, path: string, options: RequestInit = {}) {
   const connection = await prisma.cin7Connection.findUnique({ where: { companyId } });
   if (!connection) throw new Error('Cin7 not connected');
@@ -54,6 +70,65 @@ async function cin7Fetch(companyId: string, path: string, options: RequestInit =
   }
 
   return data;
+}
+
+function toNumber(value: unknown, fallback = 0) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value))) return Number(value);
+  return fallback;
+}
+
+function findPriceFromProductDetails(productDetails: any, priceTierFromSale: string | null) {
+  const details = productDetails?.Products?.[0] || productDetails?.ProductList?.[0] || productDetails?.Product?.[0] || productDetails?.Product || productDetails;
+
+  if (!details) return 0;
+
+  const directPriceFields = [
+    details.Price,
+    details.SalePrice,
+    details.SellPrice,
+    details.RetailPrice,
+    details.DefaultPrice,
+    details.UnitPrice
+  ];
+
+  for (const field of directPriceFields) {
+    const price = toNumber(field, NaN);
+    if (Number.isFinite(price)) return price;
+  }
+
+  const possiblePriceTiers = details.PriceTiers || details.PriceTier || details.SellingPriceTiers || details.SalePrices || [];
+
+  if (Array.isArray(possiblePriceTiers)) {
+    const normalizedSaleTier = (priceTierFromSale || '').trim().toLowerCase();
+
+    const matchingTier = possiblePriceTiers.find((tier: any) => {
+      const tierName = String(tier.Name || tier.PriceTier || tier.Tier || tier.Description || '').trim().toLowerCase();
+      return normalizedSaleTier && tierName === normalizedSaleTier;
+    });
+
+    if (matchingTier) {
+      return toNumber(matchingTier.Price ?? matchingTier.Value ?? matchingTier.Amount ?? matchingTier.UnitPrice, 0);
+    }
+
+    const firstTier = possiblePriceTiers[0];
+    if (firstTier) {
+      return toNumber(firstTier.Price ?? firstTier.Value ?? firstTier.Amount ?? firstTier.UnitPrice, 0);
+    }
+  }
+
+  return 0;
+}
+
+async function getProductPrice(companyId: string, productCin7Id: string | null, priceTierFromSale: string | null) {
+  if (!productCin7Id) return 0;
+
+  try {
+    const productDetails = await cin7Fetch(companyId, `/product?ID=${encodeURIComponent(productCin7Id)}`);
+    return findPriceFromProductDetails(productDetails, priceTierFromSale);
+  } catch {
+    return 0;
+  }
 }
 
 export async function syncCin7Products(companyId: string) {
@@ -136,7 +211,7 @@ export async function createCin7Sale(companyId: string, orderId: string) {
     ? await prisma.customer.findUnique({ where: { id: order.customerId } })
     : null;
 
-  const lines = [];
+  const matchedProducts = [];
 
   for (const line of order.lines) {
     if (!line.productId) continue;
@@ -144,57 +219,100 @@ export async function createCin7Sale(companyId: string, orderId: string) {
     const product = await prisma.product.findUnique({ where: { id: line.productId } });
     if (!product) continue;
 
-    lines.push({
-      ProductID: product.cin7Id,
-      SKU: product.sku || line.sku || '',
-      Name: product.name || line.productName || line.rawProductText,
-      Quantity: Number(line.quantity || 1),
-      Price: 0,
-      Discount: 0,
-      Tax: 0,
-      TaxRule: 'Tax Exempt (Sale)',
-      Total: 0,
-      Comment: line.rawProductText
-    });
+    matchedProducts.push({ line, product });
   }
 
-  if (lines.length === 0) {
+  if (matchedProducts.length === 0) {
     throw new Error('No matched product lines found. Please make sure order lines are matched before creating Cin7 sale.');
   }
 
   /*
-    Correct Cin7 Core Sale POST structure:
-    - Lines must be top-level "Lines" array.
-    - Do NOT wrap order lines inside "Order".
-    - SkipQuote is explicitly true because the account is creating simple sales directly as orders.
-    - OrderStatus is AUTHORISED because the user wants authorised sales orders.
-    - CurrencyRate is provided to prevent exchange-rate validation errors.
+    Correct flow based on the successful Cin7 payload you provided:
+    1. Create Sale header by POST /sale without Lines.
+    2. Create/update Sales Order by PUT /sale/order with SaleID and Lines.
+    The Sales Order payload requires SaleID, Lines, TotalBeforeTax, Tax, Total, TaxRule, Price, DropShip, etc.
   */
-  const payload = {
+  const saleHeaderPayload = {
     CustomerID: customer?.cin7Id || undefined,
     Customer: customer?.name || order.customerText || 'Unknown Customer',
     CustomerReference: order.poNumber || order.subject || order.id,
-    SkipQuote: true,
-    OrderStatus: 'AUTHORISED',
+    OrderStatus: 'NOTAUTHORISED',
     InvoiceStatus: 'NOTAUTHORISED',
     AutoPickPackShipMode: 'NOPICK',
     CurrencyRate: 1,
-    Note: `Created by AI Order Assistant from ${order.source}`,
-    Lines: lines
+    Note: `Created by AI Order Assistant from ${order.source}`
   };
 
-  console.log('Cin7 Sale POST payload:', JSON.stringify(payload));
-
-  const data = await cin7Fetch(companyId, '/sale', {
+  const sale = await cin7Fetch(companyId, '/sale', {
     method: 'POST',
-    body: JSON.stringify(payload)
+    body: JSON.stringify(saleHeaderPayload)
   });
 
-  const createdLines = data?.Order?.Lines || data?.Quote?.Lines || [];
+  const saleId = sale.ID || sale.SaleID || sale.id;
+  if (!saleId) {
+    throw new Error(`Cin7 created sale header but did not return SaleID. Response: ${JSON.stringify(sale)}`);
+  }
+
+  const taxRule = sale.TaxRule || 'Tax Exempt (Sale)';
+  const priceTier = sale.PriceTier || null;
+
+  const lines: SaleLineInput[] = [];
+
+  for (const item of matchedProducts) {
+    const quantity = Number(item.line.quantity || 1);
+    const price = await getProductPrice(companyId, item.product.cin7Id, priceTier);
+    const tax = 0;
+    const discount = 0;
+    const total = Number((quantity * price - discount + tax).toFixed(4));
+
+    lines.push({
+      ProductID: item.product.cin7Id,
+      SKU: item.product.sku || item.line.sku || '',
+      Name: item.product.name || item.line.productName || item.line.rawProductText,
+      Quantity: quantity,
+      Price: price,
+      Discount: discount,
+      Tax: tax,
+      AverageCost: null,
+      TaxRule: taxRule,
+      Comment: item.line.rawProductText,
+      DropShip: false,
+      BackorderQuantity: null,
+      Total: total
+    });
+  }
+
+  const totalBeforeTax = Number(lines.reduce((sum, line) => sum + line.Quantity * line.Price - line.Discount, 0).toFixed(4));
+  const tax = Number(lines.reduce((sum, line) => sum + line.Tax, 0).toFixed(4));
+  const total = Number((totalBeforeTax + tax).toFixed(4));
+
+  const saleOrderPayload = {
+    SaleID: saleId,
+    SaleOrderNumber: null,
+    Memo: order.poNumber ? `Customer PO: ${order.poNumber}` : '',
+    Status: 'AUTHORISED',
+    CombineAdditionalCharges: false,
+    TotalBeforeTax: totalBeforeTax,
+    Tax: tax,
+    Total: total,
+    Lines: lines,
+    AdditionalCharges: [],
+    AutoPickPackShipMode: 'NOPICK'
+  };
+
+  console.log('Cin7 Sale Header Payload:', JSON.stringify(saleHeaderPayload));
+  console.log('Cin7 Sale Order Payload:', JSON.stringify(saleOrderPayload));
+
+  const saleOrder = await cin7Fetch(companyId, '/sale/order', {
+    method: 'PUT',
+    body: JSON.stringify(saleOrderPayload)
+  });
+
+  const createdLines = saleOrder?.Lines || saleOrder?.Order?.Lines || [];
 
   if (!Array.isArray(createdLines) || createdLines.length === 0) {
     throw new Error(
-      `Cin7 accepted the Sale POST but returned zero order lines. This normally means Cin7 rejected one or more line fields silently. Payload: ${JSON.stringify(payload)} Response: ${JSON.stringify(data)}`
+      `Cin7 sale order endpoint returned zero lines. Payload: ${JSON.stringify(saleOrderPayload)} Response: ${JSON.stringify(saleOrder)}`
     );
   }
 
@@ -202,9 +320,12 @@ export async function createCin7Sale(companyId: string, orderId: string) {
     where: { id: orderId },
     data: {
       status: 'CREATED',
-      cin7SaleId: data.ID || data.SaleID || data.id || JSON.stringify(data).slice(0, 100)
+      cin7SaleId: saleId
     }
   });
 
-  return data;
+  return {
+    sale,
+    saleOrder
+  };
 }
