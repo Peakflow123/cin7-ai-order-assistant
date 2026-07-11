@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/auth';
 import { prisma } from '@/lib/db';
+import GmailInboxClient from './GmailInboxClient';
 
 function ChannelCard(props: {
   title: string;
@@ -101,9 +102,11 @@ export default async function InputChannelsPage() {
         />
       </div>
 
+      <GmailInboxClient connections={gmail.map((item) => ({ id: item.id, email: item.email, isActive: item.isActive }))} />
+
       <section className="card">
         <h2 className="text-xl font-bold">Manual Input Still Available</h2>
-        <p className="mt-2 text-slate-600">Until automated inbox reading is fully enabled, use manual pasted order text for testing.</p>
+        <p className="mt-2 text-slate-600">Until full automated inbox monitoring is enabled, you can keep testing with manual pasted order text.</p>
         <Link className="btn mt-4" href="/orders/new">Test Manual Order</Link>
       </section>
     </main>
