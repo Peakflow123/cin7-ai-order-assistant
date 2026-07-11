@@ -31,9 +31,11 @@ function extractJsonFromText(text: string) {
   } catch {
     const firstBrace = cleaned.indexOf('{');
     const lastBrace = cleaned.lastIndexOf('}');
+
     if (firstBrace >= 0 && lastBrace > firstBrace) {
       return JSON.parse(cleaned.slice(firstBrace, lastBrace + 1));
     }
+
     throw new Error(`AI returned invalid JSON: ${cleaned.slice(0, 500)}`);
   }
 }
@@ -99,6 +101,7 @@ ${text}
 function textScore(a: string, b: string) {
   const left = cleanAlias(a);
   const right = cleanAlias(b);
+
   if (!left || !right) return 0;
   if (left === right) return 1;
   if (left.includes(right) || right.includes(left)) return 0.9;
@@ -113,63 +116,116 @@ export async function matchCustomer(companyId: string, customerText?: string | n
 
   if (raw) {
     const learned = await prisma.customerAlias.findUnique({
-      where: { companyId_rawText: { companyId, rawText: raw } }
+      where: {
+        companyId_rawText: {
+          companyId,
+          rawText: raw
+        }
+      }
     });
 
     if (learned) {
-      const customer = await prisma.customer.findFirst({ where: { id: learned.customerId, companyId } });
+      const customer = await prisma.customer.findFirst({
+        where: {
+          id: learned.customerId,
+          companyId
+        }
+      });
+
       if (customer) return { customer, confidence: 0.99, reason: 'learned customer alias' };
     }
   }
 
   if (senderEmail) {
     const customerByEmail = await prisma.customer.findFirst({
-      where: { companyId, email: { equals: senderEmail, mode: 'insensitive' } }
+      where: {
+        companyId,
+        email: {
+          equals: senderEmail,
+          mode: 'insensitive'
+        }
+      }
     });
+
     if (customerByEmail) return { customer: customerByEmail, confidence: 0.98, reason: 'customer email match' };
   }
 
   if (!customerText) return { customer: null, confidence: 0, reason: 'no customer text' };
 
-  const customers = await prisma.customer.findMany({ where: { companyId }, take: 5000 });
+  const customers = await prisma.customer.findMany({
+    where: { companyId },
+    take: 5000
+  });
+
   let bestCustomer = null as (typeof customers)[number] | null;
   let bestScore = 0;
 
   for (const customer of customers) {
     const score = textScore(customerText, customer.name);
+
     if (score > bestScore) {
       bestCustomer = customer;
       bestScore = score;
     }
   }
 
-  return { customer: bestScore >= 0.65 ? bestCustomer : null, confidence: bestScore, reason: 'name similarity' };
+  return {
+    customer: bestScore >= 0.65 ? bestCustomer : null,
+    confidence: bestScore,
+    reason: 'name similarity'
+  };
 }
 
 export async function matchProduct(companyId: string, rawText: string, customerId?: string | null) {
   const raw = cleanAlias(rawText);
 
-  if (raw) {
+  if (raw && customerId) {
     const customerAlias = await prisma.productAlias.findFirst({
-      where: { companyId, customerId: customerId || null, rawText: raw }
+      where: {
+        companyId,
+        customerId,
+        rawText: raw
+      }
     });
 
     if (customerAlias) {
-      const product = await prisma.product.findFirst({ where: { id: customerAlias.productId, companyId } });
+      const product = await prisma.product.findFirst({
+        where: {
+          id: customerAlias.productId,
+          companyId
+        }
+      });
+
       if (product) return { product, confidence: 0.99, reason: 'learned product alias' };
     }
+  }
 
+  if (raw) {
     const globalAlias = await prisma.productAlias.findFirst({
-      where: { companyId, customerId: null, rawText: raw }
+      where: {
+        companyId,
+        customerId: null,
+        rawText: raw
+      }
     });
 
     if (globalAlias) {
-      const product = await prisma.product.findFirst({ where: { id: globalAlias.productId, companyId } });
+      const product = await prisma.product.findFirst({
+        where: {
+          id: globalAlias.productId,
+          companyId
+        }
+      });
+
       if (product) return { product, confidence: 0.97, reason: 'global product alias' };
     }
   }
 
-  const products = await prisma.product.findMany({ where: { companyId }, take: 5000 });
+  const products = await prisma.product.findMany({
+    where: { companyId },
+    take: 5000
+  });
+
   let bestProduct = null as (typeof products)[number] | null;
   let bestScore = 0;
 
@@ -177,7 +233,7 @@ export async function matchProduct(companyId: string, rawText: string, customerI
     const skuScore = product.sku && cleanAlias(product.sku) === raw ? 0.99 : 0;
     const barcodeScore = product.barcode && cleanAlias(product.barcode) === raw ? 0.99 : 0;
     const nameScore = textScore(rawText, product.name);
-    const score = Math.max(skuScore, barcodeScore, nameScore);
+    const score = Math.max(skuScore || 0, barcodeScore || 0, nameScore);
 
     if (score > bestScore) {
       bestProduct = product;
@@ -185,26 +241,54 @@ export async function matchProduct(companyId: string, rawText: string, customerI
     }
   }
 
-  return { product: bestScore >= 0.62 ? bestProduct : null, confidence: bestScore, reason: 'sku/name/barcode similarity' };
+  return {
+    product: bestScore >= 0.62 ? bestProduct : null,
+    confidence: bestScore,
+    reason: 'sku/name/barcode similarity'
+  };
 }
 
 export async function learnFromSuccessfulOrder(orderId: string) {
-  const order = await prisma.order.findUnique({ where: { id: orderId }, include: { lines: true } });
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    include: { lines: true }
+  });
+
   if (!order) return;
 
   if (order.customerId && order.customerText) {
     const rawCustomer = cleanAlias(order.customerText);
+
     if (rawCustomer) {
       await prisma.customerAlias.upsert({
-        where: { companyId_rawText: { companyId: order.companyId, rawText: rawCustomer } },
-        update: { customerId: order.customerId, timesUsed: { increment: 1 }, confidence: 1 },
-        create: { companyId: order.companyId, rawText: rawCustomer, customerId: order.customerId, confidence: 1 }
+        where: {
+          companyId_rawText: {
+            companyId: order.companyId,
+            rawText: rawCustomer
+          }
+        },
+        update: {
+          customerId: order.customerId,
+          timesUsed: { increment: 1 },
+          confidence: 1
+        },
+        create: {
+          companyId: order.companyId,
+          rawText: rawCustomer,
+          customerId: order.customerId,
+          confidence: 1
+        }
       });
     }
   }
 
+  // Prisma compound unique input does not accept null for customerId in this project version.
+  // So self-learning stores customer-specific product aliases only after a customer is matched.
+  if (!order.customerId) return;
+
   for (const line of order.lines) {
     if (!line.productId || line.confidence < 0.85) continue;
+
     const rawProduct = cleanAlias(line.rawProductText);
     if (!rawProduct) continue;
 
@@ -212,14 +296,18 @@ export async function learnFromSuccessfulOrder(orderId: string) {
       where: {
         companyId_customerId_rawText: {
           companyId: order.companyId,
-          customerId: order.customerId || null,
+          customerId: order.customerId,
           rawText: rawProduct
         }
       },
-      update: { productId: line.productId, timesUsed: { increment: 1 }, confidence: line.confidence },
+      update: {
+        productId: line.productId,
+        timesUsed: { increment: 1 },
+        confidence: line.confidence
+      },
       create: {
         companyId: order.companyId,
-        customerId: order.customerId || null,
+        customerId: order.customerId,
         rawText: rawProduct,
         productId: line.productId,
         confidence: line.confidence
