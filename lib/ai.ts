@@ -12,6 +12,12 @@ export type ExtractedOrder = {
   lines: ExtractedOrderLine[];
 };
 
+export type EmailOrderClassification = {
+  category: 'ORDER' | 'NOT_ORDER' | 'UNCLEAR';
+  confidence: number;
+  reason: string;
+};
+
 function normalize(value: string | null | undefined) {
   return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
 }
@@ -32,13 +38,67 @@ function extractJsonFromText(text: string) {
   }
 }
 
-export async function extractOrderWithAI(text: string): Promise<ExtractedOrder> {
+async function callGroqJson(prompt: string) {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error('GROQ_API_KEY missing in Vercel environment variables');
 
+  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0
+    })
+  });
+
+  const result = await response.json();
+  if (!response.ok) throw new Error(`Groq API error: ${JSON.stringify(result)}`);
+  return extractJsonFromText(result.choices?.[0]?.message?.content || '{}');
+}
+
+export async function classifyEmailForOrder(input: {
+  subject?: string | null;
+  from?: string | null;
+  bodyText: string;
+}): Promise<EmailOrderClassification> {
+  const prompt = `
+You classify B2B emails for an order processing system.
+Return ONLY valid JSON. No markdown.
+
+Categories:
+- ORDER: customer is placing or confirming a purchase/sales order, or attachment likely contains a purchase order.
+- NOT_ORDER: newsletter, invoice only, payment reminder, shipping notice, marketing, internal chat, spam, support discussion without order request.
+- UNCLEAR: not enough information but could be an order.
+
+Required JSON:
+{
+  "category": "ORDER | NOT_ORDER | UNCLEAR",
+  "confidence": 0.0,
+  "reason": "short reason"
+}
+
+Subject: ${input.subject || ''}
+From: ${input.from || ''}
+Body/attachment text:
+${input.bodyText.slice(0, 12000)}
+`;
+
+  const parsed = await callGroqJson(prompt);
+  const category = ['ORDER', 'NOT_ORDER', 'UNCLEAR'].includes(parsed.category) ? parsed.category : 'UNCLEAR';
+  const confidence = Number(parsed.confidence || 0);
+
+  return {
+    category,
+    confidence: Number.isFinite(confidence) ? confidence : 0,
+    reason: parsed.reason || 'No reason provided'
+  };
+}
+
+export async function extractOrderWithAI(text: string): Promise<ExtractedOrder> {
   const prompt = `
 You are an AI order extraction assistant for Cin7 Core.
-Extract a B2B customer purchase order from the email text below.
+Extract a B2B customer purchase order from the email text and attachment text below.
 Return ONLY valid JSON. Do not add explanation. Do not use markdown.
 
 Required JSON format:
@@ -57,29 +117,16 @@ Required JSON format:
 Important SKU matching rule:
 - If customer says box, carton, pack, case, set, each, single, bottle, roll, kg, g, ml, litre, size, color, variant, or packaging, keep that wording inside rawProductText.
 - Cin7 can have separate SKUs for box vs unit, so never remove packaging or unit wording from rawProductText.
+- Use attachment text if email body only says "see attached PO".
 - Do not invent products.
 - If quantity is missing, use 1.
 - If no order lines are found, return an empty lines array.
 
-Email text:
-${text}
+Text:
+${text.slice(0, 20000)}
 `;
 
-  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0
-    })
-  });
-
-  const result = await response.json();
-  if (!response.ok) throw new Error(`Groq API error: ${JSON.stringify(result)}`);
-
-  const raw = result.choices?.[0]?.message?.content || '{}';
-  const parsed = extractJsonFromText(raw) as ExtractedOrder;
+  const parsed = await callGroqJson(prompt) as ExtractedOrder;
 
   return {
     customerText: parsed.customerText || null,

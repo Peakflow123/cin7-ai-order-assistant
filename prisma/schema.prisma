@@ -27,14 +27,14 @@ model Company {
   name      String
   createdAt DateTime @default(now())
 
-  isActive                 Boolean @default(true)
-  allowClientCin7Edit      Boolean @default(false)
-  autoCreateEnabled        Boolean @default(true)
-  autoCreateThreshold      Float   @default(0.9)
+  isActive                  Boolean @default(true)
+  allowClientCin7Edit       Boolean @default(false)
+  autoCreateEnabled         Boolean @default(true)
+  autoCreateThreshold       Float   @default(0.9)
   allowClientEmailReconnect Boolean @default(true)
-  maxOutlookConnections    Int     @default(1)
-  maxGmailConnections      Int     @default(1)
-  maxWhatsappConnections   Int     @default(1)
+  maxOutlookConnections     Int     @default(1)
+  maxGmailConnections       Int     @default(1)
+  maxWhatsappConnections    Int     @default(1)
 
   users           User[]
   cin7            Cin7Connection?
@@ -77,6 +77,7 @@ model OutlookConnection {
   refreshTokenEncrypted String
   expiresAt             DateTime?
   isActive              Boolean   @default(true)
+  lastCheckedAt         DateTime?
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
@@ -93,6 +94,7 @@ model GmailConnection {
   refreshTokenEncrypted String
   expiryDate            BigInt?
   isActive              Boolean  @default(true)
+  lastCheckedAt         DateTime?
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
@@ -164,26 +166,31 @@ model ProductAlias {
 }
 
 model Order {
-  id              String      @id @default(cuid())
-  companyId       String
-  company         Company     @relation(fields: [companyId], references: [id])
-  source          String
-  sourceMessageId String?
-  sender          String?
-  subject         String?
-  originalText    String
-  customerText    String?
-  customerId      String?
-  poNumber        String?
-  status          OrderStatus @default(NEW)
-  cin7SaleId      String?
-  error           String?
-  createdAt       DateTime    @default(now())
+  id                 String      @id @default(cuid())
+  companyId          String
+  company            Company     @relation(fields: [companyId], references: [id])
+  source             String
+  sourceConnectionId String?
+  sourceAccount      String?
+  sourceMessageId    String?
+  sender             String?
+  subject            String?
+  originalText       String
+  customerText       String?
+  customerId         String?
+  poNumber           String?
+  status             OrderStatus @default(NEW)
+  cin7SaleId         String?
+  error              String?
+  createdAt          DateTime    @default(now())
 
-  lines           OrderLine[]
+  lines              OrderLine[]
 
   @@index([companyId, customerId])
   @@index([companyId, status])
+  @@index([companyId, source])
+  @@index([companyId, sourceConnectionId])
+  @@index([companyId, sourceMessageId])
 }
 
 model OrderLine {

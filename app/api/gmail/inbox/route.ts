@@ -8,12 +8,11 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const connectionId = url.searchParams.get('connectionId');
     const maxResults = Number(url.searchParams.get('maxResults') || 10);
+    const includeNonOrders = url.searchParams.get('includeNonOrders') === 'true';
 
-    if (!connectionId) {
-      return new NextResponse('connectionId is required', { status: 400 });
-    }
+    if (!connectionId) return new NextResponse('connectionId is required', { status: 400 });
 
-    const messages = await listRecentGmailMessages(connectionId, session.companyId, Math.min(20, Math.max(1, maxResults)));
+    const messages = await listRecentGmailMessages(connectionId, session.companyId, Math.min(20, Math.max(1, maxResults)), !includeNonOrders);
     return NextResponse.json({ messages });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown Gmail inbox error';
