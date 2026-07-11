@@ -54,7 +54,9 @@ async function parseAttachmentBuffer(filename: string, mimeType: string, buffer:
 
   try {
     if (lowerMime.includes('pdf') || lowerName.endsWith('.pdf')) {
-      const pdfParse = (await import('pdf-parse')).default;
+      // Important: import the internal parser directly.
+      // Importing the package root can trigger pdf-parse debug sample loading in serverless builds.
+      const pdfParse = (await import('pdf-parse/lib/pdf-parse.js')).default;
       const parsed = await pdfParse(buffer);
       return sanitizeText(parsed.text || '', 9000);
     }
@@ -219,12 +221,7 @@ export async function listRecentGmailMessages(connectionId: string, companyId: s
 
     const existingOrder = await prisma.order.findFirst({ where: { companyId, sourceMessageId }, select: { id: true } });
 
-    const classification = await classifyEmailForOrder({
-      subject,
-      from,
-      snippet: message.snippet || '',
-      attachmentNames
-    });
+    const classification = await classifyEmailForOrder({ subject, from, snippet: message.snippet || '', attachmentNames });
 
     if (onlyOrderRelated && classification.category === 'NOT_ORDER' && classification.confidence >= 0.7) continue;
 
