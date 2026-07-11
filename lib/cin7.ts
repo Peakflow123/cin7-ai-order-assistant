@@ -72,75 +72,188 @@ async function cin7Fetch(companyId: string, path: string, options: RequestInit =
   return data;
 }
 
-function toNumber(value: unknown, fallback = 0) {
+function toNumber(value: unknown, fallback = NaN) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value))) return Number(value);
   return fallback;
 }
 
-function findPriceFromProductDetails(productDetails: any, priceTierFromSale: string | null) {
-  const details =
+function normalize(value: unknown) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function unwrapProductDetails(productDetails: any) {
+  return (
     productDetails?.Products?.[0] ||
     productDetails?.ProductList?.[0] ||
     productDetails?.Product?.[0] ||
     productDetails?.Product ||
-    productDetails;
-
-  if (!details) return 0;
-
-  const directPriceFields = [
-    details.Price,
-    details.SalePrice,
-    details.SellPrice,
-    details.RetailPrice,
-    details.DefaultPrice,
-    details.UnitPrice
-  ];
-
-  for (const field of directPriceFields) {
-    const price = toNumber(field, NaN);
-    if (Number.isFinite(price)) return price;
-  }
-
-  const possiblePriceTiers =
-    details.PriceTiers ||
-    details.PriceTier ||
-    details.SellingPriceTiers ||
-    details.SalePrices ||
-    [];
-
-  if (Array.isArray(possiblePriceTiers)) {
-    const normalizedSaleTier = (priceTierFromSale || '').trim().toLowerCase();
-
-    const matchingTier = possiblePriceTiers.find((tier: any) => {
-      const tierName = String(tier.Name || tier.PriceTier || tier.Tier || tier.Description || '')
-        .trim()
-        .toLowerCase();
-      return normalizedSaleTier && tierName === normalizedSaleTier;
-    });
-
-    if (matchingTier) {
-      return toNumber(matchingTier.Price ?? matchingTier.Value ?? matchingTier.Amount ?? matchingTier.UnitPrice, 0);
-    }
-
-    const firstTier = possiblePriceTiers[0];
-    if (firstTier) {
-      return toNumber(firstTier.Price ?? firstTier.Value ?? firstTier.Amount ?? firstTier.UnitPrice, 0);
-    }
-  }
-
-  return 0;
+    productDetails
+  );
 }
 
-async function getProductPrice(companyId: string, productCin7Id: string | null, priceTierFromSale: string | null) {
-  if (!productCin7Id) return 0;
+function getObjectPaths(source: any, prefix = '', depth = 0): Array<{ path: string; value: any }> {
+  if (!source || typeof source !== 'object' || depth > 4) return [];
 
-  try {
-    const productDetails = await cin7Fetch(companyId, `/product?ID=${encodeURIComponent(productCin7Id)}`);
-    return findPriceFromProductDetails(productDetails, priceTierFromSale);
-  } catch {
-    return 0;
+  const paths: Array<{ path: string; value: any }> = [];
+
+  for (const key of Object.keys(source)) {
+    const value = source[key];
+    const path = prefix ? `${prefix}.${key}` : key;
+    paths.push({ path, value });
+
+    if (value && typeof value === 'object') {
+      paths.push(...getObjectPaths(value, path, depth + 1));
+    }
   }
+
+  return paths;
+}
+
+function findPriceByCustomerTier(productDetails: any, customerPriceTier: string | null) {
+  const product = unwrapProductDetails(productDetails);
+  const tierName = customerPriceTier || '';
+  const normalizedTier = normalize(tierName);
+
+  if (!product) return NaN;
+
+  /*
+    Cin7 Core has up to 10 price points per product. Customers are assigned a price tier,
+    and the sale order price tier/customer price tier determines which product price to use.
+    This resolver intentionally searches many possible API response shapes because Cin7/API
+    responses can expose price tiers as arrays, objects, or numbered fields depending on endpoint/version.
+  */
+
+  const possibleArrays = [
+    product.PriceTiers,
+    product.PriceTier,
+    product.Prices,
+    product.SalePrices,
+    product.SellingPrices,
+    product.SellingPriceTiers,
+    product.ProductPrices
+  ];
+
+  for (const arr of possibleArrays) {
+    if (!Array.isArray(arr)) continue;
+
+    const match = arr.find((item: any) => {
+      const possibleNames = [
+        item.Name,
+        item.PriceTier,
+        item.Tier,
+        item.TierName,
+        item.Description,
+        item.Key,
+        item.Label
+      ];
+      return possibleNames.some((name) => normalize(name) === normalizedTier);
+    });
+
+    if (match) {
+      const price = toNumber(match.Price ?? match.Value ?? match.Amount ?? match.UnitPrice ?? match.SalePrice);
+      if (Number.isFinite(price)) return price;
+    }
+  }
+
+  const possibleObjects = [
+    product.PriceTiers,
+    product.PriceTier,
+    product.Prices,
+    product.SalePrices,
+    product.SellingPrices,
+    product.SellingPriceTiers,
+    product.ProductPrices
+  ];
+
+  for (const obj of possibleObjects) {
+    if (!obj || Array.isArray(obj) || typeof obj !== 'object') continue;
+
+    for (const key of Object.keys(obj)) {
+      if (normalize(key) === normalizedTier) {
+        const price = toNumber(obj[key]);
+        if (Number.isFinite(price)) return price;
+
+        if (obj[key] && typeof obj[key] === 'object') {
+          const nestedPrice = toNumber(
+            obj[key].Price ?? obj[key].Value ?? obj[key].Amount ?? obj[key].UnitPrice ?? obj[key].SalePrice
+          );
+          if (Number.isFinite(nestedPrice)) return nestedPrice;
+        }
+      }
+    }
+  }
+
+  const allPaths = getObjectPaths(product);
+
+  /* Match direct field names like Retail, RetailPrice, Retail_Price, Retail Price, etc. */
+  for (const entry of allPaths) {
+    const pathName = normalize(entry.path);
+    const price = toNumber(entry.value);
+
+    if (!Number.isFinite(price)) continue;
+    if (pathName === normalizedTier || pathName.endsWith(normalizedTier) || pathName.includes(`${normalizedTier}price`)) {
+      return price;
+    }
+  }
+
+  /* If tier is explicitly numeric, e.g. Price Tier 3, use PriceTier3. */
+  const tierNumberMatch = String(tierName).match(/(\d+)/);
+  if (tierNumberMatch) {
+    const tierNumber = tierNumberMatch[1];
+    const numberedCandidates = [
+      `PriceTier${tierNumber}`,
+      `PriceTier${tierNumber}Price`,
+      `Tier${tierNumber}`,
+      `Tier${tierNumber}Price`,
+      `Price${tierNumber}`
+    ];
+
+    for (const field of numberedCandidates) {
+      const price = toNumber(product[field]);
+      if (Number.isFinite(price)) return price;
+    }
+  }
+
+  /* Last resort: if the product response exposes numbered price fields, return the first non-zero price. */
+  for (let i = 1; i <= 10; i += 1) {
+    const candidates = [
+      product[`PriceTier${i}`],
+      product[`PriceTier${i}Price`],
+      product[`Tier${i}`],
+      product[`Tier${i}Price`],
+      product[`Price${i}`]
+    ];
+
+    for (const candidate of candidates) {
+      const price = toNumber(candidate);
+      if (Number.isFinite(price) && price > 0) return price;
+    }
+  }
+
+  return NaN;
+}
+
+async function getProductPrice(companyId: string, productCin7Id: string | null, customerPriceTier: string | null) {
+  if (!productCin7Id) {
+    throw new Error('Cannot get price because product Cin7 ID is missing.');
+  }
+
+  const productDetails = await cin7Fetch(companyId, `/product?ID=${encodeURIComponent(productCin7Id)}`);
+  const price = findPriceByCustomerTier(productDetails, customerPriceTier);
+
+  if (!Number.isFinite(price)) {
+    const product = unwrapProductDetails(productDetails);
+    const keys = product && typeof product === 'object' ? Object.keys(product).slice(0, 80) : [];
+    throw new Error(
+      `Could not find product price for customer price tier "${customerPriceTier}". ProductID: ${productCin7Id}. Product response keys: ${JSON.stringify(keys)}. Please send the GET /product response so the exact Cin7 price field can be mapped.`
+    );
+  }
+
+  return price;
 }
 
 export async function syncCin7Products(companyId: string) {
@@ -238,14 +351,6 @@ export async function createCin7Sale(companyId: string, orderId: string) {
     throw new Error('No matched product lines found. Please make sure order lines are matched before creating Cin7 sale.');
   }
 
-  /*
-    Correct Cin7 Core flow:
-    1. POST /sale creates the sale header.
-    2. POST /sale/order creates/updates the order section lines.
-
-    Your last error was 405 because /sale/order does not support PUT in this tenant/API.
-    Therefore this file uses POST for /sale/order.
-  */
   const saleHeaderPayload = {
     CustomerID: customer?.cin7Id || undefined,
     Customer: customer?.name || order.customerText || 'Unknown Customer',
@@ -267,14 +372,18 @@ export async function createCin7Sale(companyId: string, orderId: string) {
     throw new Error(`Cin7 created sale header but did not return SaleID. Response: ${JSON.stringify(sale)}`);
   }
 
+  const customerPriceTier = sale.PriceTier || null;
   const taxRule = sale.TaxRule || 'Tax Exempt (Sale)';
-  const priceTier = sale.PriceTier || null;
+
+  if (!customerPriceTier) {
+    throw new Error(`Cin7 sale response did not return customer PriceTier. Response: ${JSON.stringify(sale)}`);
+  }
 
   const lines: SaleLineInput[] = [];
 
   for (const item of matchedProducts) {
     const quantity = Number(item.line.quantity || 1);
-    const price = await getProductPrice(companyId, item.product.cin7Id, priceTier);
+    const price = await getProductPrice(companyId, item.product.cin7Id, customerPriceTier);
     const discount = 0;
     const tax = 0;
     const total = Number((quantity * price - discount + tax).toFixed(4));
@@ -317,6 +426,7 @@ export async function createCin7Sale(companyId: string, orderId: string) {
   };
 
   console.log('Cin7 Sale Header Payload:', JSON.stringify(saleHeaderPayload));
+  console.log('Customer price tier from Cin7 sale:', customerPriceTier);
   console.log('Cin7 Sale Order Payload:', JSON.stringify(saleOrderPayload));
 
   const saleOrder = await cin7Fetch(companyId, '/sale/order', {
