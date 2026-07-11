@@ -41,7 +41,7 @@ async function cin7Fetch(companyId: string, path: string, options: RequestInit =
   });
 
   const text = await response.text();
-  let data: unknown = null;
+  let data: any = null;
 
   try {
     data = text ? JSON.parse(text) : null;
@@ -53,7 +53,7 @@ async function cin7Fetch(companyId: string, path: string, options: RequestInit =
     throw new Error(`Cin7 API error ${response.status}: ${JSON.stringify(data)}`);
   }
 
-  return data as any;
+  return data;
 }
 
 export async function syncCin7Products(companyId: string) {
@@ -104,8 +104,18 @@ export async function syncCin7Customers(companyId: string) {
 
     await prisma.customer.upsert({
       where: { companyId_cin7Id: { companyId, cin7Id } },
-      update: { name, email: item.Email || null, phone: item.Phone || null },
-      create: { companyId, cin7Id, name, email: item.Email || null, phone: item.Phone || null }
+      update: {
+        name,
+        email: item.Email || null,
+        phone: item.Phone || null
+      },
+      create: {
+        companyId,
+        cin7Id,
+        name,
+        email: item.Email || null,
+        phone: item.Phone || null
+      }
     });
 
     count += 1;
@@ -115,23 +125,52 @@ export async function syncCin7Customers(companyId: string) {
 }
 
 export async function createCin7Sale(companyId: string, orderId: string) {
-  const order = await prisma.order.findUnique({ where: { id: orderId }, include: { lines: true } });
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    include: { lines: true }
+  });
+
   if (!order) throw new Error('Order not found');
 
   const customer = order.customerId
     ? await prisma.customer.findUnique({ where: { id: order.customerId } })
     : null;
 
+  const saleLines = [];
+
+  for (const line of order.lines) {
+    if (!line.productId) continue;
+
+    const product = await prisma.product.findUnique({ where: { id: line.productId } });
+    if (!product) continue;
+
+    saleLines.push({
+      ProductID: product.cin7Id,
+      SKU: product.sku || line.sku || undefined,
+      Name: product.name || line.productName || line.rawProductText,
+      Quantity: Number(line.quantity || 1),
+      Price: 0,
+      Discount: 0,
+      Tax: 0,
+      Total: 0,
+      Comment: line.rawProductText
+    });
+  }
+
+  if (saleLines.length === 0) {
+    throw new Error('No matched product lines found. Please make sure order lines are matched before creating Cin7 sale.');
+  }
+
   const payload = {
+    CustomerID: customer?.cin7Id || undefined,
     Customer: customer?.name || order.customerText || 'Unknown Customer',
     CustomerReference: order.poNumber || order.subject || order.id,
-    Status: 'DRAFT',
-    Lines: order.lines.map((line) => ({
-      SKU: line.sku,
-      Name: line.productName || line.rawProductText,
-      Quantity: line.quantity,
-      Price: 0
-    }))
+    OrderStatus: 'NOTAUTHORISED',
+    InvoiceStatus: 'NOTAUTHORISED',
+    AutoPickPackShipMode: 'NOPICK',
+    CurrencyRate: 1,
+    Note: `Created by AI Order Assistant from ${order.source}`,
+    Lines: saleLines
   };
 
   const data = await cin7Fetch(companyId, '/sale', {
