@@ -27,14 +27,19 @@ model Company {
   name      String
   createdAt DateTime @default(now())
 
-  allowClientCin7Edit Boolean @default(false)
-  autoCreateEnabled   Boolean @default(true)
-  autoCreateThreshold Float   @default(0.9)
+  isActive                 Boolean @default(true)
+  allowClientCin7Edit      Boolean @default(false)
+  autoCreateEnabled        Boolean @default(true)
+  autoCreateThreshold      Float   @default(0.9)
+  allowClientEmailReconnect Boolean @default(true)
+  maxOutlookConnections    Int     @default(1)
+  maxGmailConnections      Int     @default(1)
+  maxWhatsappConnections   Int     @default(1)
 
   users           User[]
   cin7            Cin7Connection?
-  outlook         OutlookConnection?
-  gmail           GmailConnection?
+  outlook         OutlookConnection[]
+  gmail           GmailConnection[]
   products        Product[]
   customers       Customer[]
   aliases         ProductAlias[]
@@ -65,24 +70,34 @@ model Cin7Connection {
 
 model OutlookConnection {
   id                    String    @id @default(cuid())
-  companyId             String    @unique
+  companyId             String
   company               Company   @relation(fields: [companyId], references: [id])
   email                 String?
   accessTokenEncrypted  String
   refreshTokenEncrypted String
   expiresAt             DateTime?
+  isActive              Boolean   @default(true)
+  createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
+
+  @@index([companyId])
+  @@index([companyId, isActive])
 }
 
 model GmailConnection {
   id                    String   @id @default(cuid())
-  companyId             String   @unique
+  companyId             String
   company               Company  @relation(fields: [companyId], references: [id])
   email                 String?
   accessTokenEncrypted  String
   refreshTokenEncrypted String
   expiryDate            BigInt?
+  isActive              Boolean  @default(true)
+  createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([companyId, isActive])
 }
 
 model Product {

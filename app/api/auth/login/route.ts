@@ -6,13 +6,17 @@ import { isPlatformAdminEmail, signSession } from '@/lib/auth';
 
 export async function POST(request: Request) {
   const body = await request.json();
-  const user = await prisma.user.findUnique({ where: { email: body.email } });
+  const user = await prisma.user.findUnique({ where: { email: body.email }, include: { company: true } });
 
   if (!user || !(await bcrypt.compare(body.password, user.passwordHash))) {
     return new NextResponse('Invalid login', { status: 401 });
   }
 
   const role = user.role === 'PLATFORM_ADMIN' || isPlatformAdminEmail(user.email) ? 'PLATFORM_ADMIN' : user.role;
+
+  if (!user.company.isActive && role !== 'PLATFORM_ADMIN') {
+    return new NextResponse('This client account is inactive. Please contact platform admin.', { status: 403 });
+  }
 
   cookies().set('session', signSession({ userId: user.id, companyId: user.companyId, email: user.email, role }), {
     httpOnly: true,
