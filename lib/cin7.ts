@@ -79,7 +79,12 @@ function toNumber(value: unknown, fallback = 0) {
 }
 
 function findPriceFromProductDetails(productDetails: any, priceTierFromSale: string | null) {
-  const details = productDetails?.Products?.[0] || productDetails?.ProductList?.[0] || productDetails?.Product?.[0] || productDetails?.Product || productDetails;
+  const details =
+    productDetails?.Products?.[0] ||
+    productDetails?.ProductList?.[0] ||
+    productDetails?.Product?.[0] ||
+    productDetails?.Product ||
+    productDetails;
 
   if (!details) return 0;
 
@@ -97,13 +102,20 @@ function findPriceFromProductDetails(productDetails: any, priceTierFromSale: str
     if (Number.isFinite(price)) return price;
   }
 
-  const possiblePriceTiers = details.PriceTiers || details.PriceTier || details.SellingPriceTiers || details.SalePrices || [];
+  const possiblePriceTiers =
+    details.PriceTiers ||
+    details.PriceTier ||
+    details.SellingPriceTiers ||
+    details.SalePrices ||
+    [];
 
   if (Array.isArray(possiblePriceTiers)) {
     const normalizedSaleTier = (priceTierFromSale || '').trim().toLowerCase();
 
     const matchingTier = possiblePriceTiers.find((tier: any) => {
-      const tierName = String(tier.Name || tier.PriceTier || tier.Tier || tier.Description || '').trim().toLowerCase();
+      const tierName = String(tier.Name || tier.PriceTier || tier.Tier || tier.Description || '')
+        .trim()
+        .toLowerCase();
       return normalizedSaleTier && tierName === normalizedSaleTier;
     });
 
@@ -227,10 +239,12 @@ export async function createCin7Sale(companyId: string, orderId: string) {
   }
 
   /*
-    Correct flow based on the successful Cin7 payload you provided:
-    1. Create Sale header by POST /sale without Lines.
-    2. Create/update Sales Order by PUT /sale/order with SaleID and Lines.
-    The Sales Order payload requires SaleID, Lines, TotalBeforeTax, Tax, Total, TaxRule, Price, DropShip, etc.
+    Correct Cin7 Core flow:
+    1. POST /sale creates the sale header.
+    2. POST /sale/order creates/updates the order section lines.
+
+    Your last error was 405 because /sale/order does not support PUT in this tenant/API.
+    Therefore this file uses POST for /sale/order.
   */
   const saleHeaderPayload = {
     CustomerID: customer?.cin7Id || undefined,
@@ -261,8 +275,8 @@ export async function createCin7Sale(companyId: string, orderId: string) {
   for (const item of matchedProducts) {
     const quantity = Number(item.line.quantity || 1);
     const price = await getProductPrice(companyId, item.product.cin7Id, priceTier);
-    const tax = 0;
     const discount = 0;
+    const tax = 0;
     const total = Number((quantity * price - discount + tax).toFixed(4));
 
     lines.push({
@@ -282,7 +296,9 @@ export async function createCin7Sale(companyId: string, orderId: string) {
     });
   }
 
-  const totalBeforeTax = Number(lines.reduce((sum, line) => sum + line.Quantity * line.Price - line.Discount, 0).toFixed(4));
+  const totalBeforeTax = Number(
+    lines.reduce((sum, line) => sum + line.Quantity * line.Price - line.Discount, 0).toFixed(4)
+  );
   const tax = Number(lines.reduce((sum, line) => sum + line.Tax, 0).toFixed(4));
   const total = Number((totalBeforeTax + tax).toFixed(4));
 
@@ -304,7 +320,7 @@ export async function createCin7Sale(companyId: string, orderId: string) {
   console.log('Cin7 Sale Order Payload:', JSON.stringify(saleOrderPayload));
 
   const saleOrder = await cin7Fetch(companyId, '/sale/order', {
-    method: 'PUT',
+    method: 'POST',
     body: JSON.stringify(saleOrderPayload)
   });
 
