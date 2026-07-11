@@ -7,6 +7,8 @@ export default async function Dashboard() {
   const session = getSession();
   if (!session) redirect('/login');
 
+  const company = await prisma.company.findUnique({ where: { id: session.companyId }, select: { name: true } });
+
   const [orders, products, customers, learnedProducts, learnedCustomers, recentOrders] = await Promise.all([
     prisma.order.count({ where: { companyId: session.companyId } }),
     prisma.product.count({ where: { companyId: session.companyId } }),
@@ -20,10 +22,10 @@ export default async function Dashboard() {
     <main className="page-shell space-y-6">
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="page-title">Dashboard</h1>
-          <p className="page-subtitle">Manage AI order capture, Cin7 sync, and review workflow.</p>
+          <h1 className="page-title">{company?.name || 'Client'} Dashboard</h1>
+          <p className="page-subtitle">NexOrder AI order capture, review, learning, and Cin7 automation.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Link className="btn-secondary" href="/orders">View Orders</Link>
           <Link className="btn" href="/orders/new">Test New Order</Link>
           {isPlatformAdmin(session) && <Link className="btn-secondary" href="/admin">Admin</Link>}
@@ -38,9 +40,19 @@ export default async function Dashboard() {
         <div className="card"><p className="text-sm text-slate-500">Customer Learning</p><p className="mt-2 text-4xl font-bold">{learnedCustomers}</p></div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <Link className="card transition hover:-translate-y-0.5 hover:shadow-md" href="/settings"><h2 className="text-xl font-bold">Cin7 Connection</h2><p className="mt-2 text-slate-500">Connect once, then refresh product and customer data.</p></Link>
-        <Link className="card transition hover:-translate-y-0.5 hover:shadow-md" href="/orders/new"><h2 className="text-xl font-bold">Test Email Order</h2><p className="mt-2 text-slate-500">Paste an order email and let AI extract customer, products, and quantities.</p></Link>
+      <div className="grid gap-4 md:grid-cols-3">
+        <Link className="card transition hover:-translate-y-0.5 hover:shadow-md" href="/settings">
+          <h2 className="text-xl font-bold">Cin7 Connection</h2>
+          <p className="mt-2 text-slate-500">Connect once, then refresh product and customer data when required.</p>
+        </Link>
+        <Link className="card transition hover:-translate-y-0.5 hover:shadow-md" href="/orders/new">
+          <h2 className="text-xl font-bold">Test Manual Order</h2>
+          <p className="mt-2 text-slate-500">Paste an order email and review the mapped customer/products before creating order.</p>
+        </Link>
+        <Link className="card transition hover:-translate-y-0.5 hover:shadow-md" href="/email">
+          <h2 className="text-xl font-bold">Input Channels</h2>
+          <p className="mt-2 text-slate-500">Prepare Outlook, Gmail, and WhatsApp order intake channels.</p>
+        </Link>
       </div>
 
       <section className="card">
