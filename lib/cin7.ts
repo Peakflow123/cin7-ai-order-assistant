@@ -136,7 +136,7 @@ export async function createCin7Sale(companyId: string, orderId: string) {
     ? await prisma.customer.findUnique({ where: { id: order.customerId } })
     : null;
 
-  const saleOrderLines = [];
+  const lines = [];
 
   for (const line of order.lines) {
     if (!line.productId) continue;
@@ -144,65 +144,57 @@ export async function createCin7Sale(companyId: string, orderId: string) {
     const product = await prisma.product.findUnique({ where: { id: line.productId } });
     if (!product) continue;
 
-    const quantity = Number(line.quantity || 1);
-    const price = 0;
-    const discount = 0;
-    const tax = 0;
-    const total = 0;
-
-    saleOrderLines.push({
+    lines.push({
       ProductID: product.cin7Id,
       SKU: product.sku || line.sku || '',
       Name: product.name || line.productName || line.rawProductText,
-      Quantity: quantity,
-      Price: price,
-      Discount: discount,
-      Tax: tax,
-      Total: total,
+      Quantity: Number(line.quantity || 1),
+      Price: 0,
+      Discount: 0,
+      Tax: 0,
       TaxRule: 'Tax Exempt (Sale)',
+      Total: 0,
       Comment: line.rawProductText
     });
   }
 
-  if (saleOrderLines.length === 0) {
+  if (lines.length === 0) {
     throw new Error('No matched product lines found. Please make sure order lines are matched before creating Cin7 sale.');
   }
 
   /*
-    IMPORTANT:
-    Cin7 ignored top-level "Lines" in your API log.
-    Order lines must be sent inside the nested "Order" object as "Order.Lines".
-    This payload also creates the sale order as AUTHORISED.
+    Correct Cin7 Core Sale POST structure:
+    - Lines must be top-level "Lines" array.
+    - Do NOT wrap order lines inside "Order".
+    - SkipQuote is explicitly true because the account is creating simple sales directly as orders.
+    - OrderStatus is AUTHORISED because the user wants authorised sales orders.
+    - CurrencyRate is provided to prevent exchange-rate validation errors.
   */
   const payload = {
     CustomerID: customer?.cin7Id || undefined,
     Customer: customer?.name || order.customerText || 'Unknown Customer',
     CustomerReference: order.poNumber || order.subject || order.id,
+    SkipQuote: true,
     OrderStatus: 'AUTHORISED',
     InvoiceStatus: 'NOTAUTHORISED',
     AutoPickPackShipMode: 'NOPICK',
     CurrencyRate: 1,
     Note: `Created by AI Order Assistant from ${order.source}`,
-    Order: {
-      Memo: order.poNumber ? `Customer PO: ${order.poNumber}` : null,
-      Status: 'AUTHORISED',
-      Lines: saleOrderLines,
-      AdditionalCharges: []
-    }
+    Lines: lines
   };
 
-  console.log('Cin7 sale payload:', JSON.stringify(payload));
+  console.log('Cin7 Sale POST payload:', JSON.stringify(payload));
 
   const data = await cin7Fetch(companyId, '/sale', {
     method: 'POST',
     body: JSON.stringify(payload)
   });
 
-  const createdLines = data?.Order?.Lines || [];
+  const createdLines = data?.Order?.Lines || data?.Quote?.Lines || [];
 
   if (!Array.isArray(createdLines) || createdLines.length === 0) {
     throw new Error(
-      `Cin7 created sale header but returned zero order lines. Payload used: ${JSON.stringify(payload)} Response: ${JSON.stringify(data)}`
+      `Cin7 accepted the Sale POST but returned zero order lines. This normally means Cin7 rejected one or more line fields silently. Payload: ${JSON.stringify(payload)} Response: ${JSON.stringify(data)}`
     );
   }
 
