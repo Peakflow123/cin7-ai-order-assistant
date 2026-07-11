@@ -59,22 +59,15 @@ async function cin7Fetch(companyId: string, path: string, options: RequestInit =
 export async function syncCin7Products(companyId: string) {
   const data = await cin7Fetch(companyId, '/product?Page=1&Limit=1000');
   const list: Cin7Product[] = data.Products || data.ProductList || data.Product || data.Items || [];
-
   let count = 0;
 
   for (const item of list) {
     const name = item.Name || item.ProductName;
     const cin7Id = item.ID || item.Id;
-
     if (!name || !cin7Id) continue;
 
     await prisma.product.upsert({
-      where: {
-        companyId_cin7Id: {
-          companyId,
-          cin7Id
-        }
-      },
+      where: { companyId_cin7Id: { companyId, cin7Id } },
       update: {
         sku: item.SKU || item.Code || null,
         name,
@@ -102,22 +95,15 @@ export async function syncCin7Products(companyId: string) {
 export async function syncCin7Customers(companyId: string) {
   const data = await cin7Fetch(companyId, '/customer?Page=1&Limit=1000');
   const list: Cin7Customer[] = data.Customers || data.CustomerList || data.Customer || data.Items || [];
-
   let count = 0;
 
   for (const item of list) {
     const name = item.Name || item.CustomerName;
     const cin7Id = item.ID || item.Id;
-
     if (!name || !cin7Id) continue;
 
     await prisma.customer.upsert({
-      where: {
-        companyId_cin7Id: {
-          companyId,
-          cin7Id
-        }
-      },
+      where: { companyId_cin7Id: { companyId, cin7Id } },
       update: {
         name,
         email: item.Email || null,
@@ -150,91 +136,83 @@ export async function createCin7Sale(companyId: string, orderId: string) {
     ? await prisma.customer.findUnique({ where: { id: order.customerId } })
     : null;
 
-  const saleLines = [];
+  const saleOrderLines = [];
 
   for (const line of order.lines) {
     if (!line.productId) continue;
 
-    const product = await prisma.product.findUnique({
-      where: { id: line.productId }
-    });
-
+    const product = await prisma.product.findUnique({ where: { id: line.productId } });
     if (!product) continue;
 
-    saleLines.push({
+    const quantity = Number(line.quantity || 1);
+    const price = 0;
+    const discount = 0;
+    const tax = 0;
+    const total = 0;
+
+    saleOrderLines.push({
       ProductID: product.cin7Id,
       SKU: product.sku || line.sku || '',
       Name: product.name || line.productName || line.rawProductText,
-      Quantity: Number(line.quantity || 1),
-      Price: 0,
-      Discount: 0,
-      Tax: 0,
-      Total: 0,
+      Quantity: quantity,
+      Price: price,
+      Discount: discount,
+      Tax: tax,
+      Total: total,
       TaxRule: 'Tax Exempt (Sale)',
       Comment: line.rawProductText
     });
   }
 
-  if (saleLines.length === 0) {
+  if (saleOrderLines.length === 0) {
     throw new Error('No matched product lines found. Please make sure order lines are matched before creating Cin7 sale.');
   }
 
   /*
-    Step 1:
-    Create the sale header only.
-    We keep CurrencyRate = 1 to avoid exchange rate error.
+    IMPORTANT:
+    Cin7 ignored top-level "Lines" in your API log.
+    Order lines must be sent inside the nested "Order" object as "Order.Lines".
+    This payload also creates the sale order as AUTHORISED.
   */
-  const saleHeaderPayload = {
+  const payload = {
     CustomerID: customer?.cin7Id || undefined,
     Customer: customer?.name || order.customerText || 'Unknown Customer',
     CustomerReference: order.poNumber || order.subject || order.id,
-    OrderStatus: 'NOTAUTHORISED',
+    OrderStatus: 'AUTHORISED',
     InvoiceStatus: 'NOTAUTHORISED',
     AutoPickPackShipMode: 'NOPICK',
     CurrencyRate: 1,
-    Note: `Created by AI Order Assistant from ${order.source}`
+    Note: `Created by AI Order Assistant from ${order.source}`,
+    Order: {
+      Memo: order.poNumber ? `Customer PO: ${order.poNumber}` : null,
+      Status: 'AUTHORISED',
+      Lines: saleOrderLines,
+      AdditionalCharges: []
+    }
   };
 
-  const sale = await cin7Fetch(companyId, '/sale', {
+  console.log('Cin7 sale payload:', JSON.stringify(payload));
+
+  const data = await cin7Fetch(companyId, '/sale', {
     method: 'POST',
-    body: JSON.stringify(saleHeaderPayload)
+    body: JSON.stringify(payload)
   });
 
-  const saleId = sale.ID || sale.SaleID || sale.id;
+  const createdLines = data?.Order?.Lines || [];
 
-  if (!saleId) {
-    throw new Error(`Cin7 sale was created but no Sale ID was returned: ${JSON.stringify(sale)}`);
+  if (!Array.isArray(createdLines) || createdLines.length === 0) {
+    throw new Error(
+      `Cin7 created sale header but returned zero order lines. Payload used: ${JSON.stringify(payload)} Response: ${JSON.stringify(data)}`
+    );
   }
-
-  /*
-    Step 2:
-    Add lines to the sale order.
-    Cin7 response shows lines should appear under Order.Lines,
-    so this second call updates the order section directly.
-  */
-  const saleOrderPayload = {
-    TaskID: saleId,
-    Memo: order.poNumber ? `Customer PO: ${order.poNumber}` : null,
-    Status: 'DRAFT',
-    Lines: saleLines,
-    AdditionalCharges: []
-  };
-
-  const saleOrder = await cin7Fetch(companyId, '/sale/order', {
-    method: 'PUT',
-    body: JSON.stringify(saleOrderPayload)
-  });
 
   await prisma.order.update({
     where: { id: orderId },
     data: {
       status: 'CREATED',
-      cin7SaleId: saleId
+      cin7SaleId: data.ID || data.SaleID || data.id || JSON.stringify(data).slice(0, 100)
     }
   });
 
-  return {
-    sale,
-    saleOrder
-  };
+  return data;
 }
