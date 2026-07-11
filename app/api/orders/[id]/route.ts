@@ -17,8 +17,8 @@ export async function GET(_request: Request, { params }: { params: { id: string 
 
   const [customer, customers, products] = await Promise.all([
     order.customerId ? prisma.customer.findFirst({ where: { id: order.customerId, companyId: order.companyId } }) : null,
-    prisma.customer.findMany({ where: { companyId: order.companyId }, orderBy: { name: 'asc' }, take: 1000 }),
-    prisma.product.findMany({ where: { companyId: order.companyId }, orderBy: { name: 'asc' }, take: 3000 })
+    prisma.customer.findMany({ where: { companyId: order.companyId }, orderBy: { name: 'asc' }, take: 1500 }),
+    prisma.product.findMany({ where: { companyId: order.companyId }, orderBy: [{ sku: 'asc' }, { name: 'asc' }], take: 5000 })
   ]);
 
   return NextResponse.json({ order, customer, customers, products });
@@ -37,7 +37,9 @@ export async function PUT(request: Request, { params }: { params: { id: string }
   });
 
   if (!order) return new NextResponse('Order not found', { status: 404 });
-  if (order.status === 'CREATED') return new NextResponse('Order is already created in Cin7 and cannot be edited here.', { status: 400 });
+  if (order.status === 'CREATED' || order.cin7SaleId) {
+    return new NextResponse('Order is already created in Cin7 and cannot be edited here.', { status: 400 });
+  }
 
   const customer = body.customerId
     ? await prisma.customer.findFirst({ where: { id: body.customerId, companyId: order.companyId } })
@@ -48,7 +50,8 @@ export async function PUT(request: Request, { params }: { params: { id: string }
     data: {
       customerId: customer?.id || null,
       customerText: customer?.name || body.customerText || order.customerText,
-      poNumber: body.poNumber || null
+      poNumber: body.poNumber || null,
+      status: 'NEEDS_REVIEW'
     }
   });
 
@@ -64,12 +67,11 @@ export async function PUT(request: Request, { params }: { params: { id: string }
         productName: product?.name || null,
         sku: product?.sku || null,
         quantity: Number(lineInput.quantity || 1),
-        uom: lineInput.uom || null,
         confidence: product ? 1 : 0,
         status: product ? 'MATCHED' : 'UNMATCHED'
       }
     });
   }
 
-  return new NextResponse('Order review saved.');
+  return new NextResponse('Review changes saved successfully.');
 }

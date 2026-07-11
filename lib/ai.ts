@@ -13,10 +13,7 @@ export type ExtractedOrder = {
 };
 
 function normalize(value: string | null | undefined) {
-  return String(value || '')
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, ' ');
+  return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
 function cleanAlias(value: string | null | undefined) {
@@ -25,17 +22,12 @@ function cleanAlias(value: string | null | undefined) {
 
 function extractJsonFromText(text: string) {
   const cleaned = text.replace(/```json|```/g, '').trim();
-
   try {
     return JSON.parse(cleaned);
   } catch {
     const firstBrace = cleaned.indexOf('{');
     const lastBrace = cleaned.lastIndexOf('}');
-
-    if (firstBrace >= 0 && lastBrace > firstBrace) {
-      return JSON.parse(cleaned.slice(firstBrace, lastBrace + 1));
-    }
-
+    if (firstBrace >= 0 && lastBrace > firstBrace) return JSON.parse(cleaned.slice(firstBrace, lastBrace + 1));
     throw new Error(`AI returned invalid JSON: ${cleaned.slice(0, 500)}`);
   }
 }
@@ -55,18 +47,19 @@ Required JSON format:
   "poNumber": "PO/reference number if found, otherwise null",
   "lines": [
     {
-      "rawProductText": "product text exactly as customer wrote it",
+      "rawProductText": "product text including unit/pack/box/carton/size exactly as customer intended",
       "quantity": 1,
-      "uom": "unit of measure if found, otherwise null"
+      "uom": "unit wording if found, otherwise null"
     }
   ]
 }
 
-Rules:
+Important SKU matching rule:
+- If customer says box, carton, pack, case, set, each, single, bottle, roll, kg, g, ml, litre, size, color, variant, or packaging, keep that wording inside rawProductText.
+- Cin7 can have separate SKUs for box vs unit, so never remove packaging or unit wording from rawProductText.
 - Do not invent products.
 - If quantity is missing, use 1.
 - If no order lines are found, return an empty lines array.
-- Keep rawProductText simple and clean.
 
 Email text:
 ${text}
@@ -74,10 +67,7 @@ ${text}
 
   const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json'
-    },
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
       messages: [{ role: 'user', content: prompt }],
@@ -101,217 +91,116 @@ ${text}
 function textScore(a: string, b: string) {
   const left = cleanAlias(a);
   const right = cleanAlias(b);
-
   if (!left || !right) return 0;
   if (left === right) return 1;
   if (left.includes(right) || right.includes(left)) return 0.9;
-
   const words = left.split(' ').filter(Boolean);
   const hits = words.filter((word) => right.includes(word)).length;
   return words.length ? hits / words.length : 0;
+}
+
+function packagingWords(value: string) {
+  const words = cleanAlias(value).split(' ');
+  return words.filter((word) => ['box', 'boxes', 'carton', 'cartons', 'case', 'cases', 'pack', 'packs', 'packet', 'set', 'unit', 'each', 'single', 'bottle', 'roll', 'kg', 'g', 'ml', 'l', 'litre', 'liter', 'pcs', 'piece', 'pieces'].includes(word));
+}
+
+function packagingBonus(rawText: string, productText: string) {
+  const rawPackaging = packagingWords(rawText);
+  if (rawPackaging.length === 0) return 0;
+  const product = cleanAlias(productText);
+  const matched = rawPackaging.filter((word) => product.includes(word)).length;
+  return matched / rawPackaging.length * 0.12;
 }
 
 export async function matchCustomer(companyId: string, customerText?: string | null, senderEmail?: string | null) {
   const raw = cleanAlias(customerText || senderEmail || '');
 
   if (raw) {
-    const learned = await prisma.customerAlias.findUnique({
-      where: {
-        companyId_rawText: {
-          companyId,
-          rawText: raw
-        }
-      }
-    });
-
+    const learned = await prisma.customerAlias.findUnique({ where: { companyId_rawText: { companyId, rawText: raw } } });
     if (learned) {
-      const customer = await prisma.customer.findFirst({
-        where: {
-          id: learned.customerId,
-          companyId
-        }
-      });
-
+      const customer = await prisma.customer.findFirst({ where: { id: learned.customerId, companyId } });
       if (customer) return { customer, confidence: 0.99, reason: 'learned customer alias' };
     }
   }
 
   if (senderEmail) {
-    const customerByEmail = await prisma.customer.findFirst({
-      where: {
-        companyId,
-        email: {
-          equals: senderEmail,
-          mode: 'insensitive'
-        }
-      }
-    });
-
+    const customerByEmail = await prisma.customer.findFirst({ where: { companyId, email: { equals: senderEmail, mode: 'insensitive' } } });
     if (customerByEmail) return { customer: customerByEmail, confidence: 0.98, reason: 'customer email match' };
   }
 
   if (!customerText) return { customer: null, confidence: 0, reason: 'no customer text' };
 
-  const customers = await prisma.customer.findMany({
-    where: { companyId },
-    take: 5000
-  });
-
+  const customers = await prisma.customer.findMany({ where: { companyId }, take: 5000 });
   let bestCustomer = null as (typeof customers)[number] | null;
   let bestScore = 0;
 
   for (const customer of customers) {
     const score = textScore(customerText, customer.name);
-
     if (score > bestScore) {
       bestCustomer = customer;
       bestScore = score;
     }
   }
 
-  return {
-    customer: bestScore >= 0.65 ? bestCustomer : null,
-    confidence: bestScore,
-    reason: 'name similarity'
-  };
+  return { customer: bestScore >= 0.65 ? bestCustomer : null, confidence: bestScore, reason: 'name similarity' };
 }
 
 export async function matchProduct(companyId: string, rawText: string, customerId?: string | null) {
   const raw = cleanAlias(rawText);
 
   if (raw && customerId) {
-    const customerAlias = await prisma.productAlias.findFirst({
-      where: {
-        companyId,
-        customerId,
-        rawText: raw
-      }
-    });
-
+    const customerAlias = await prisma.productAlias.findFirst({ where: { companyId, customerId, rawText: raw } });
     if (customerAlias) {
-      const product = await prisma.product.findFirst({
-        where: {
-          id: customerAlias.productId,
-          companyId
-        }
-      });
-
+      const product = await prisma.product.findFirst({ where: { id: customerAlias.productId, companyId } });
       if (product) return { product, confidence: 0.99, reason: 'learned product alias' };
     }
   }
 
-  if (raw) {
-    const globalAlias = await prisma.productAlias.findFirst({
-      where: {
-        companyId,
-        customerId: null,
-        rawText: raw
-      }
-    });
-
-    if (globalAlias) {
-      const product = await prisma.product.findFirst({
-        where: {
-          id: globalAlias.productId,
-          companyId
-        }
-      });
-
-      if (product) return { product, confidence: 0.97, reason: 'global product alias' };
-    }
-  }
-
-  const products = await prisma.product.findMany({
-    where: { companyId },
-    take: 5000
-  });
-
+  const products = await prisma.product.findMany({ where: { companyId }, take: 5000 });
   let bestProduct = null as (typeof products)[number] | null;
   let bestScore = 0;
 
   for (const product of products) {
+    const combined = `${product.sku || ''} ${product.name}`;
     const skuScore = product.sku && cleanAlias(product.sku) === raw ? 0.99 : 0;
     const barcodeScore = product.barcode && cleanAlias(product.barcode) === raw ? 0.99 : 0;
-    const nameScore = textScore(rawText, product.name);
+    const nameScore = Math.min(1, textScore(rawText, combined) + packagingBonus(rawText, combined));
     const score = Math.max(skuScore || 0, barcodeScore || 0, nameScore);
-
     if (score > bestScore) {
       bestProduct = product;
       bestScore = score;
     }
   }
 
-  return {
-    product: bestScore >= 0.62 ? bestProduct : null,
-    confidence: bestScore,
-    reason: 'sku/name/barcode similarity'
-  };
+  return { product: bestScore >= 0.62 ? bestProduct : null, confidence: bestScore, reason: 'sku/name/barcode/packaging similarity' };
 }
 
 export async function learnFromSuccessfulOrder(orderId: string) {
-  const order = await prisma.order.findUnique({
-    where: { id: orderId },
-    include: { lines: true }
-  });
-
+  const order = await prisma.order.findUnique({ where: { id: orderId }, include: { lines: true } });
   if (!order) return;
 
   if (order.customerId && order.customerText) {
     const rawCustomer = cleanAlias(order.customerText);
-
     if (rawCustomer) {
       await prisma.customerAlias.upsert({
-        where: {
-          companyId_rawText: {
-            companyId: order.companyId,
-            rawText: rawCustomer
-          }
-        },
-        update: {
-          customerId: order.customerId,
-          timesUsed: { increment: 1 },
-          confidence: 1
-        },
-        create: {
-          companyId: order.companyId,
-          rawText: rawCustomer,
-          customerId: order.customerId,
-          confidence: 1
-        }
+        where: { companyId_rawText: { companyId: order.companyId, rawText: rawCustomer } },
+        update: { customerId: order.customerId, timesUsed: { increment: 1 }, confidence: 1 },
+        create: { companyId: order.companyId, rawText: rawCustomer, customerId: order.customerId, confidence: 1 }
       });
     }
   }
 
-  // Prisma compound unique input does not accept null for customerId in this project version.
-  // So self-learning stores customer-specific product aliases only after a customer is matched.
   if (!order.customerId) return;
 
   for (const line of order.lines) {
     if (!line.productId || line.confidence < 0.85) continue;
-
     const rawProduct = cleanAlias(line.rawProductText);
     if (!rawProduct) continue;
 
     await prisma.productAlias.upsert({
-      where: {
-        companyId_customerId_rawText: {
-          companyId: order.companyId,
-          customerId: order.customerId,
-          rawText: rawProduct
-        }
-      },
-      update: {
-        productId: line.productId,
-        timesUsed: { increment: 1 },
-        confidence: line.confidence
-      },
-      create: {
-        companyId: order.companyId,
-        customerId: order.customerId,
-        rawText: rawProduct,
-        productId: line.productId,
-        confidence: line.confidence
-      }
+      where: { companyId_customerId_rawText: { companyId: order.companyId, customerId: order.customerId, rawText: rawProduct } },
+      update: { productId: line.productId, timesUsed: { increment: 1 }, confidence: line.confidence },
+      create: { companyId: order.companyId, customerId: order.customerId, rawText: rawProduct, productId: line.productId, confidence: line.confidence }
     });
   }
 }

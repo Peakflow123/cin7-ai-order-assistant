@@ -2,19 +2,81 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --page-bg: #f8fafc;
+  --card-bg: #ffffff;
+  --ink: #0f172a;
+  --muted: #64748b;
+  --brand: #0f172a;
+  --accent: #14b8a6;
+}
+
+* {
+  box-sizing: border-box;
+}
+
 body {
-  background: #f8fafc;
-  color: #0f172a;
+  margin: 0;
+  background: var(--page-bg);
+  color: var(--ink);
 }
 
 .input {
-  @apply w-full rounded-xl border border-slate-300 px-3 py-2 bg-white;
+  @apply w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-slate-900 focus:ring-2 focus:ring-slate-200 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500;
 }
 
 .btn {
-  @apply rounded-xl bg-slate-900 text-white px-4 py-2 font-medium hover:bg-slate-700;
+  @apply inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-2 font-semibold text-white shadow-sm transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500;
+}
+
+.btn-secondary {
+  @apply inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-800 shadow-sm transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400;
+}
+
+.btn-success {
+  @apply inline-flex items-center justify-center rounded-xl bg-teal-600 px-4 py-2 font-semibold text-white shadow-sm transition hover:bg-teal-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500;
 }
 
 .card {
-  @apply bg-white rounded-2xl shadow-sm border border-slate-200 p-5;
+  @apply rounded-3xl border border-slate-200 bg-white p-6 shadow-sm;
+}
+
+.page-shell {
+  @apply mx-auto max-w-7xl px-6 py-8;
+}
+
+.page-title {
+  @apply text-3xl font-bold tracking-tight text-slate-950;
+}
+
+.page-subtitle {
+  @apply mt-1 text-sm text-slate-500;
+}
+
+.nav-link {
+  @apply rounded-xl px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-950;
+}
+
+.badge {
+  @apply inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold;
+}
+
+.badge-green {
+  @apply bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200;
+}
+
+.badge-yellow {
+  @apply bg-amber-50 text-amber-700 ring-1 ring-amber-200;
+}
+
+.badge-red {
+  @apply bg-red-50 text-red-700 ring-1 ring-red-200;
+}
+
+.badge-gray {
+  @apply bg-slate-100 text-slate-700 ring-1 ring-slate-200;
+}
+
+.section-label {
+  @apply text-sm font-semibold text-slate-700;
 }
