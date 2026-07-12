@@ -10,12 +10,19 @@ export async function GET(request: Request) {
   const cronSecret = process.env.CRON_SECRET;
   const authHeader = request.headers.get('authorization');
 
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+  if (!cronSecret) {
+    return NextResponse.json({ message: 'CRON_SECRET is missing in Vercel environment variables.' }, { status: 500 });
+  }
+
+  if (authHeader !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
   }
 
   const connections = await prisma.gmailConnection.findMany({
-    where: { isActive: true, company: { isActive: true } },
+    where: {
+      isActive: true,
+      company: { isActive: true }
+    },
     include: { company: true },
     take: 25
   });
@@ -27,17 +34,19 @@ export async function GET(request: Request) {
 
   for (const connection of connections) {
     try {
-      const messages = await listRecentGmailMessages(connection.id, connection.companyId, 8, true);
+      const messages = await listRecentGmailMessages(connection.id, connection.companyId, 5, true);
       found += messages.length;
 
-      for (const message of messages.slice(0, 5)) {
+      for (const message of messages.slice(0, 3)) {
         if (message.alreadyProcessed) continue;
+
         if (message.classification.category !== 'ORDER' && message.classification.confidence >= 0.7) {
           skipped += 1;
           continue;
         }
 
         const full = await getGmailMessageText(connection.id, connection.companyId, message.id);
+
         const result = await processEmailIntoOrder({
           companyId: connection.companyId,
           source: 'gmail',
@@ -53,11 +62,22 @@ export async function GET(request: Request) {
         if (result.skipped) skipped += 1;
       }
 
-      await prisma.gmailConnection.update({ where: { id: connection.id }, data: { lastCheckedAt: new Date() } });
+      await prisma.gmailConnection.update({
+        where: { id: connection.id },
+        data: { lastCheckedAt: new Date() }
+      });
     } catch (error) {
       errors.push(`${connection.email || connection.id}: ${error instanceof Error ? error.message : 'unknown error'}`);
     }
   }
 
-  return NextResponse.json({ ok: true, connections: connections.length, found, processed, skipped, errors });
+  return NextResponse.json({
+    ok: true,
+    checkedAt: new Date().toISOString(),
+    connections: connections.length,
+    found,
+    processed,
+    skipped,
+    errors
+  });
 }

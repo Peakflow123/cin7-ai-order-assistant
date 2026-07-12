@@ -22,7 +22,7 @@ async function Header() {
   return (
     <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/90 backdrop-blur">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-        <Link href="/dashboard" className="flex items-center gap-3">
+        <Link href={session ? '/dashboard' : '/'} className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-900 text-lg font-bold text-white">N</div>
           <div>
             <p className="text-lg font-bold text-slate-950">NexOrder AI</p>
@@ -37,6 +37,13 @@ async function Header() {
           {session && <Link className="nav-link" href="/email">Input Channels</Link>}
           {session && <Link className="nav-link" href="/settings">Cin7</Link>}
           {admin && <Link className="nav-link" href="/admin">Admin</Link>}
+          {session ? (
+            <form action="/api/auth/logout" method="post">
+              <button className="btn-secondary" type="submit">Logout</button>
+            </form>
+          ) : (
+            <Link className="btn" href="/login">Login</Link>
+          )}
         </nav>
       </div>
     </header>
