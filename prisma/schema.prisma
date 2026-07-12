@@ -45,6 +45,7 @@ model Company {
   aliases         ProductAlias[]
   customerAliases CustomerAlias[]
   orders          Order[]
+  orderFeedback   OrderFeedback[]
 }
 
 model User {
@@ -205,4 +206,23 @@ model OrderLine {
   uom            String?
   confidence     Float      @default(0)
   status         LineStatus @default(UNMATCHED)
+}
+
+model OrderFeedback {
+  id              String   @id @default(cuid())
+  companyId       String
+  company         Company  @relation(fields: [companyId], references: [id])
+  feedbackType    String
+  comment         String?
+  source          String?
+  sourceAccount   String?
+  sender          String?
+  subject         String?
+  originalText    String?
+  sourceMessageId String?
+  createdAt       DateTime @default(now())
+
+  @@index([companyId, feedbackType])
+  @@index([companyId, source])
+  @@index([companyId, createdAt])
 }

@@ -28,17 +28,10 @@ function cleanAlias(value: string | null | undefined) {
 
 function extractJsonFromText(text: string) {
   const cleaned = text.replace(/```json|```/g, '').trim();
-
-  try {
-    return JSON.parse(cleaned);
-  } catch {
+  try { return JSON.parse(cleaned); } catch {
     const firstBrace = cleaned.indexOf('{');
     const lastBrace = cleaned.lastIndexOf('}');
-
-    if (firstBrace >= 0 && lastBrace > firstBrace) {
-      return JSON.parse(cleaned.slice(firstBrace, lastBrace + 1));
-    }
-
+    if (firstBrace >= 0 && lastBrace > firstBrace) return JSON.parse(cleaned.slice(firstBrace, lastBrace + 1));
     throw new Error(`AI returned invalid JSON: ${cleaned.slice(0, 500)}`);
   }
 }
@@ -57,24 +50,14 @@ async function callGroqJson(prompt: string, options?: { model?: string; maxToken
   async function callOnce() {
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0,
-        max_tokens: maxTokens
-      })
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], temperature: 0, max_tokens: maxTokens })
     });
-
     const result = await response.json();
     return { response, result };
   }
 
   let { response, result } = await callOnce();
-
   if (!response.ok && options?.retryOnRateLimit !== false && result?.error?.code === 'rate_limit_exceeded') {
     await sleep(9000);
     const retry = await callOnce();
@@ -83,11 +66,30 @@ async function callGroqJson(prompt: string, options?: { model?: string; maxToken
   }
 
   if (!response.ok) throw new Error(`Groq API error: ${JSON.stringify(result)}`);
-
   return extractJsonFromText(result.choices?.[0]?.message?.content || '{}');
 }
 
+async function getFalsePositiveExamples(companyId?: string) {
+  if (!companyId) return '';
+
+  const feedback = await prisma.orderFeedback.findMany({
+    where: { companyId, feedbackType: 'NOT_ORDER' },
+    orderBy: { createdAt: 'desc' },
+    take: 8
+  });
+
+  if (feedback.length === 0) return '';
+
+  return feedback.map((item, index) => {
+    const subject = item.subject || 'No subject';
+    const comment = item.comment || 'No comment';
+    const preview = (item.originalText || '').replace(/\s+/g, ' ').slice(0, 350);
+    return `${index + 1}. Subject: ${subject}\nUser comment: ${comment}\nEmail preview: ${preview}`;
+  }).join('\n\n');
+}
+
 export async function classifyEmailForOrder(input: {
+  companyId?: string;
   subject?: string | null;
   from?: string | null;
   snippet?: string | null;
@@ -95,6 +97,7 @@ export async function classifyEmailForOrder(input: {
   bodyText?: string;
 }): Promise<EmailOrderClassification> {
   const attachmentNames = input.attachmentNames?.length ? input.attachmentNames.join(', ') : 'None';
+  const falsePositiveExamples = await getFalsePositiveExamples(input.companyId);
 
   const prompt = `
 Classify this B2B email for an order processing system.
@@ -102,8 +105,11 @@ Return ONLY valid JSON. No markdown.
 
 Categories:
 - ORDER: customer is placing or confirming a purchase/sales order, or attachment name likely contains a PO/order.
-- NOT_ORDER: newsletter, invoice only, payment reminder, shipping notice, marketing, support discussion, spam, or unrelated email.
+- NOT_ORDER: newsletter, invoice only, payment reminder, shipping notice, marketing, support discussion, spam, quote request with no confirmed purchase, vendor PO not from customer, or unrelated email.
 - UNCLEAR: not enough information but could be an order.
+
+Learn from user feedback. These previous emails looked like orders but users deleted them as NOT_ORDER:
+${falsePositiveExamples || 'No feedback examples yet.'}
 
 Required JSON:
 {
@@ -118,27 +124,14 @@ Snippet/body preview: ${(input.snippet || input.bodyText || '').slice(0, 1800)}
 Attachment names: ${attachmentNames}
 `;
 
-  const parsed = await callGroqJson(prompt, {
-    model: process.env.GROQ_CLASSIFIER_MODEL || 'llama-3.1-8b-instant',
-    maxTokens: 180
-  });
-
+  const parsed = await callGroqJson(prompt, { model: process.env.GROQ_CLASSIFIER_MODEL || 'llama-3.1-8b-instant', maxTokens: 220 });
   const category = ['ORDER', 'NOT_ORDER', 'UNCLEAR'].includes(parsed.category) ? parsed.category : 'UNCLEAR';
   const confidence = Number(parsed.confidence || 0);
-
-  return {
-    category,
-    confidence: Number.isFinite(confidence) ? confidence : 0,
-    reason: parsed.reason || 'No reason provided'
-  };
+  return { category, confidence: Number.isFinite(confidence) ? confidence : 0, reason: parsed.reason || 'No reason provided' };
 }
 
 export async function extractOrderWithAI(text: string): Promise<ExtractedOrder> {
-  const compactText = text
-    .replace(/\s+/g, ' ')
-    .replace(/Attachment: /g, '\nAttachment: ')
-    .slice(0, 14000);
-
+  const compactText = text.replace(/\s+/g, ' ').replace(/Attachment: /g, '\nAttachment: ').slice(0, 14000);
   const prompt = `
 You are an AI order extraction assistant for Cin7 Core.
 Extract a B2B customer purchase order from the email text and attachment text below.
@@ -149,11 +142,7 @@ Required JSON format:
   "customerText": "customer name if found, otherwise null",
   "poNumber": "PO/reference number if found, otherwise null",
   "lines": [
-    {
-      "rawProductText": "product text including unit/pack/box/carton/size exactly as customer intended",
-      "quantity": 1,
-      "uom": "unit wording if found, otherwise null"
-    }
+    { "rawProductText": "product text including unit/pack/box/carton/size exactly as customer intended", "quantity": 1, "uom": "unit wording if found, otherwise null" }
   ]
 }
 
@@ -168,26 +157,16 @@ Text:
 ${compactText}
 `;
 
-  const parsed = await callGroqJson(prompt, {
-    model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
-    maxTokens: 1600
-  }) as ExtractedOrder;
-
-  return {
-    customerText: parsed.customerText || null,
-    poNumber: parsed.poNumber || null,
-    lines: Array.isArray(parsed.lines) ? parsed.lines : []
-  };
+  const parsed = await callGroqJson(prompt, { model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile', maxTokens: 1600 }) as ExtractedOrder;
+  return { customerText: parsed.customerText || null, poNumber: parsed.poNumber || null, lines: Array.isArray(parsed.lines) ? parsed.lines : [] };
 }
 
 function textScore(a: string, b: string) {
   const left = cleanAlias(a);
   const right = cleanAlias(b);
-
   if (!left || !right) return 0;
   if (left === right) return 1;
   if (left.includes(right) || right.includes(left)) return 0.9;
-
   const words = left.split(' ').filter(Boolean);
   const hits = words.filter((word) => right.includes(word)).length;
   return words.length ? hits / words.length : 0;
@@ -201,7 +180,6 @@ function packagingWords(value: string) {
 function packagingBonus(rawText: string, productText: string) {
   const rawPackaging = packagingWords(rawText);
   if (rawPackaging.length === 0) return 0;
-
   const product = cleanAlias(productText);
   const matched = rawPackaging.filter((word) => product.includes(word)).length;
   return matched / rawPackaging.length * 0.12;
@@ -209,12 +187,8 @@ function packagingBonus(rawText: string, productText: string) {
 
 export async function matchCustomer(companyId: string, customerText?: string | null, senderEmail?: string | null) {
   const raw = cleanAlias(customerText || senderEmail || '');
-
   if (raw) {
-    const learned = await prisma.customerAlias.findUnique({
-      where: { companyId_rawText: { companyId, rawText: raw } }
-    });
-
+    const learned = await prisma.customerAlias.findUnique({ where: { companyId_rawText: { companyId, rawText: raw } } });
     if (learned) {
       const customer = await prisma.customer.findFirst({ where: { id: learned.customerId, companyId } });
       if (customer) return { customer, confidence: 0.99, reason: 'learned customer alias' };
@@ -222,14 +196,11 @@ export async function matchCustomer(companyId: string, customerText?: string | n
   }
 
   if (senderEmail) {
-    const customerByEmail = await prisma.customer.findFirst({
-      where: { companyId, email: { equals: senderEmail, mode: 'insensitive' } }
-    });
+    const customerByEmail = await prisma.customer.findFirst({ where: { companyId, email: { equals: senderEmail, mode: 'insensitive' } } });
     if (customerByEmail) return { customer: customerByEmail, confidence: 0.98, reason: 'customer email match' };
   }
 
   if (!customerText) return { customer: null, confidence: 0, reason: 'no customer text' };
-
   const customers = await prisma.customer.findMany({ where: { companyId }, take: 5000 });
   let bestCustomer = null as (typeof customers)[number] | null;
   let bestScore = 0;
@@ -247,7 +218,6 @@ export async function matchCustomer(companyId: string, customerText?: string | n
 
 export async function matchProduct(companyId: string, rawText: string, customerId?: string | null) {
   const raw = cleanAlias(rawText);
-
   if (raw && customerId) {
     const customerAlias = await prisma.productAlias.findFirst({ where: { companyId, customerId, rawText: raw } });
     if (customerAlias) {
@@ -266,7 +236,6 @@ export async function matchProduct(companyId: string, rawText: string, customerI
     const barcodeScore = product.barcode && cleanAlias(product.barcode) === raw ? 0.99 : 0;
     const nameScore = Math.min(1, textScore(rawText, combined) + packagingBonus(rawText, combined));
     const score = Math.max(skuScore || 0, barcodeScore || 0, nameScore);
-
     if (score > bestScore) {
       bestProduct = product;
       bestScore = score;
@@ -292,21 +261,12 @@ export async function learnFromSuccessfulOrder(orderId: string) {
   }
 
   if (!order.customerId) return;
-
   for (const line of order.lines) {
     if (!line.productId || line.confidence < 0.85) continue;
-
     const rawProduct = cleanAlias(line.rawProductText);
     if (!rawProduct) continue;
-
     await prisma.productAlias.upsert({
-      where: {
-        companyId_customerId_rawText: {
-          companyId: order.companyId,
-          customerId: order.customerId,
-          rawText: rawProduct
-        }
-      },
+      where: { companyId_customerId_rawText: { companyId: order.companyId, customerId: order.customerId, rawText: rawProduct } },
       update: { productId: line.productId, timesUsed: { increment: 1 }, confidence: line.confidence },
       create: { companyId: order.companyId, customerId: order.customerId, rawText: rawProduct, productId: line.productId, confidence: line.confidence }
     });
