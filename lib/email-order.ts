@@ -21,7 +21,7 @@ export async function processEmailIntoOrder(input: {
   const existingOrder = await prisma.order.findFirst({ where: { companyId: input.companyId, sourceMessageId: input.sourceMessageId } });
   if (existingOrder) return { orderId: existingOrder.id, alreadyProcessed: true, message: 'This message has already been processed.' };
 
-  const classification = await classifyEmailForOrder({ subject: input.subject, from: input.sender, bodyText: input.bodyText });
+  const classification = await classifyEmailForOrder({ companyId: input.companyId, subject: input.subject, from: input.sender, bodyText: input.bodyText });
   if (!input.force && classification.category === 'NOT_ORDER' && classification.confidence >= 0.7) {
     return { orderId: null, skipped: true, classification, message: 'Email is not related to a customer order.' };
   }
@@ -52,25 +52,11 @@ export async function processEmailIntoOrder(input: {
   });
 
   const confidences: number[] = [];
-
   for (const line of extracted.lines) {
     const match = await matchProduct(input.companyId, line.rawProductText, customer?.id || null);
     const confidence = match.confidence || 0;
     confidences.push(confidence);
-
-    await prisma.orderLine.create({
-      data: {
-        orderId: order.id,
-        rawProductText: line.rawProductText,
-        quantity: Number(line.quantity || 1),
-        uom: line.uom || null,
-        productId: confidence >= 0.7 ? match.product?.id || null : null,
-        productName: confidence >= 0.7 ? match.product?.name || null : null,
-        sku: confidence >= 0.7 ? match.product?.sku || null : null,
-        confidence,
-        status: confidence >= 0.85 ? 'MATCHED' : confidence >= 0.7 ? 'NEEDS_REVIEW' : 'UNMATCHED'
-      }
-    });
+    await prisma.orderLine.create({ data: { orderId: order.id, rawProductText: line.rawProductText, quantity: Number(line.quantity || 1), uom: line.uom || null, productId: confidence >= 0.7 ? match.product?.id || null : null, productName: confidence >= 0.7 ? match.product?.name || null : null, sku: confidence >= 0.7 ? match.product?.sku || null : null, confidence, status: confidence >= 0.85 ? 'MATCHED' : confidence >= 0.7 ? 'NEEDS_REVIEW' : 'UNMATCHED' } });
   }
 
   const minimumConfidence = Math.min(customerMatch.confidence || 0, ...(confidences.length ? confidences : [0]));

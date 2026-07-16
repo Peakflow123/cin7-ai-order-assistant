@@ -28,7 +28,9 @@ function cleanAlias(value: string | null | undefined) {
 
 function extractJsonFromText(text: string) {
   const cleaned = text.replace(/```json|```/g, '').trim();
-  try { return JSON.parse(cleaned); } catch {
+  try {
+    return JSON.parse(cleaned);
+  } catch {
     const firstBrace = cleaned.indexOf('{');
     const lastBrace = cleaned.lastIndexOf('}');
     if (firstBrace >= 0 && lastBrace > firstBrace) return JSON.parse(cleaned.slice(firstBrace, lastBrace + 1));
@@ -51,7 +53,12 @@ async function callGroqJson(prompt: string, options?: { model?: string; maxToken
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], temperature: 0, max_tokens: maxTokens })
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0,
+        max_tokens: maxTokens
+      })
     });
     const result = await response.json();
     return { response, result };
@@ -69,7 +76,7 @@ async function callGroqJson(prompt: string, options?: { model?: string; maxToken
   return extractJsonFromText(result.choices?.[0]?.message?.content || '{}');
 }
 
-async function getFalsePositiveExamples(companyId?: string) {
+async function getClientFalsePositiveExamples(companyId?: string) {
   if (!companyId) return '';
 
   const feedback = await prisma.orderFeedback.findMany({
@@ -97,7 +104,7 @@ export async function classifyEmailForOrder(input: {
   bodyText?: string;
 }): Promise<EmailOrderClassification> {
   const attachmentNames = input.attachmentNames?.length ? input.attachmentNames.join(', ') : 'None';
-  const falsePositiveExamples = await getFalsePositiveExamples(input.companyId);
+  const falsePositiveExamples = await getClientFalsePositiveExamples(input.companyId);
 
   const prompt = `
 Classify this B2B email for an order processing system.
@@ -105,10 +112,10 @@ Return ONLY valid JSON. No markdown.
 
 Categories:
 - ORDER: customer is placing or confirming a purchase/sales order, or attachment name likely contains a PO/order.
-- NOT_ORDER: newsletter, invoice only, payment reminder, shipping notice, marketing, support discussion, spam, quote request with no confirmed purchase, vendor PO not from customer, or unrelated email.
+- NOT_ORDER: newsletter, invoice only, payment reminder, shipping notice, marketing, support discussion, spam, quote request with no confirmed purchase, vendor purchase order not from a customer, or unrelated email.
 - UNCLEAR: not enough information but could be an order.
 
-Learn from user feedback. These previous emails looked like orders but users deleted them as NOT_ORDER:
+Only use feedback examples from this same client/company. Previous NOT_ORDER feedback for this client:
 ${falsePositiveExamples || 'No feedback examples yet.'}
 
 Required JSON:
@@ -124,14 +131,23 @@ Snippet/body preview: ${(input.snippet || input.bodyText || '').slice(0, 1800)}
 Attachment names: ${attachmentNames}
 `;
 
-  const parsed = await callGroqJson(prompt, { model: process.env.GROQ_CLASSIFIER_MODEL || 'llama-3.1-8b-instant', maxTokens: 220 });
+  const parsed = await callGroqJson(prompt, {
+    model: process.env.GROQ_CLASSIFIER_MODEL || 'llama-3.1-8b-instant',
+    maxTokens: 220
+  });
+
   const category = ['ORDER', 'NOT_ORDER', 'UNCLEAR'].includes(parsed.category) ? parsed.category : 'UNCLEAR';
   const confidence = Number(parsed.confidence || 0);
-  return { category, confidence: Number.isFinite(confidence) ? confidence : 0, reason: parsed.reason || 'No reason provided' };
+  return {
+    category,
+    confidence: Number.isFinite(confidence) ? confidence : 0,
+    reason: parsed.reason || 'No reason provided'
+  };
 }
 
 export async function extractOrderWithAI(text: string): Promise<ExtractedOrder> {
   const compactText = text.replace(/\s+/g, ' ').replace(/Attachment: /g, '\nAttachment: ').slice(0, 14000);
+
   const prompt = `
 You are an AI order extraction assistant for Cin7 Core.
 Extract a B2B customer purchase order from the email text and attachment text below.
@@ -157,8 +173,16 @@ Text:
 ${compactText}
 `;
 
-  const parsed = await callGroqJson(prompt, { model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile', maxTokens: 1600 }) as ExtractedOrder;
-  return { customerText: parsed.customerText || null, poNumber: parsed.poNumber || null, lines: Array.isArray(parsed.lines) ? parsed.lines : [] };
+  const parsed = await callGroqJson(prompt, {
+    model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+    maxTokens: 1600
+  }) as ExtractedOrder;
+
+  return {
+    customerText: parsed.customerText || null,
+    poNumber: parsed.poNumber || null,
+    lines: Array.isArray(parsed.lines) ? parsed.lines : []
+  };
 }
 
 function textScore(a: string, b: string) {
@@ -187,6 +211,7 @@ function packagingBonus(rawText: string, productText: string) {
 
 export async function matchCustomer(companyId: string, customerText?: string | null, senderEmail?: string | null) {
   const raw = cleanAlias(customerText || senderEmail || '');
+
   if (raw) {
     const learned = await prisma.customerAlias.findUnique({ where: { companyId_rawText: { companyId, rawText: raw } } });
     if (learned) {
@@ -201,6 +226,7 @@ export async function matchCustomer(companyId: string, customerText?: string | n
   }
 
   if (!customerText) return { customer: null, confidence: 0, reason: 'no customer text' };
+
   const customers = await prisma.customer.findMany({ where: { companyId }, take: 5000 });
   let bestCustomer = null as (typeof customers)[number] | null;
   let bestScore = 0;
@@ -218,6 +244,7 @@ export async function matchCustomer(companyId: string, customerText?: string | n
 
 export async function matchProduct(companyId: string, rawText: string, customerId?: string | null) {
   const raw = cleanAlias(rawText);
+
   if (raw && customerId) {
     const customerAlias = await prisma.productAlias.findFirst({ where: { companyId, customerId, rawText: raw } });
     if (customerAlias) {
@@ -261,6 +288,7 @@ export async function learnFromSuccessfulOrder(orderId: string) {
   }
 
   if (!order.customerId) return;
+
   for (const line of order.lines) {
     if (!line.productId || line.confidence < 0.85) continue;
     const rawProduct = cleanAlias(line.rawProductText);
