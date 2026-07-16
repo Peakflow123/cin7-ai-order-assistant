@@ -40,6 +40,7 @@ model Company {
   cin7            Cin7Connection?
   outlook         OutlookConnection[]
   gmail           GmailConnection[]
+  whatsapp        WhatsappConnection[]
   products        Product[]
   customers       Customer[]
   aliases         ProductAlias[]
@@ -101,6 +102,25 @@ model GmailConnection {
 
   @@index([companyId])
   @@index([companyId, isActive])
+}
+
+model WhatsappConnection {
+  id                   String   @id @default(cuid())
+  companyId            String
+  company              Company  @relation(fields: [companyId], references: [id])
+  displayPhoneNumber   String?
+  phoneNumberId        String
+  businessAccountId    String?
+  accessTokenEncrypted String?
+  verifyToken          String
+  isActive             Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@unique([companyId, phoneNumberId])
+  @@index([companyId])
+  @@index([companyId, isActive])
+  @@index([phoneNumberId])
 }
 
 model Product {
