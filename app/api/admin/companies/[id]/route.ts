@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
-import { requireSession, isPlatformAdmin } from '@/lib/auth';
+import { requirePlatformAdmin } from '@/lib/auth';
 import { prisma } from '@/lib/db';
+import { logActivity } from '@/lib/activity';
 
 function asBool(value: unknown) {
   return value === true || value === 'true' || value === 'on' || value === 1;
@@ -17,9 +18,7 @@ function asFloat(value: unknown, fallback = 0) {
 }
 
 export async function PATCH(request: Request, { params }: { params: { id: string } }) {
-  const session = requireSession();
-  if (!isPlatformAdmin(session)) return new NextResponse('Forbidden', { status: 403 });
-
+  const session = requirePlatformAdmin();
   const body = await request.json();
   const existing = await prisma.company.findUnique({ where: { id: params.id } });
   if (!existing) return new NextResponse('Company not found', { status: 404 });
@@ -29,6 +28,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     data: {
       name: String(body.name || existing.name).trim(),
       isActive: asBool(body.isActive),
+      isArchived: asBool(body.isArchived),
       allowClientCin7Edit: asBool(body.allowClientCin7Edit),
       autoCreateEnabled: asBool(body.autoCreateEnabled),
       autoCreateThreshold: asFloat(body.autoCreateThreshold, existing.autoCreateThreshold),
@@ -38,6 +38,8 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       maxWhatsappConnections: 0
     }
   });
+
+  await logActivity({ session, companyId: updated.id, action: 'COMPANY_CONTROLS_UPDATED', entityType: 'Company', entityId: updated.id, message: `${updated.name} controls updated.` });
 
   return NextResponse.json({ message: 'Client controls updated.', company: updated });
 }

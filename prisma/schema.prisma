@@ -27,14 +27,17 @@ model Company {
   name      String
   createdAt DateTime @default(now())
 
-  isActive                  Boolean @default(true)
-  allowClientCin7Edit       Boolean @default(false)
-  autoCreateEnabled         Boolean @default(true)
-  autoCreateThreshold       Float   @default(0.9)
-  allowClientEmailReconnect Boolean @default(true)
-  maxOutlookConnections     Int     @default(1)
-  maxGmailConnections       Int     @default(1)
-  maxWhatsappConnections    Int     @default(0)
+  isActive                  Boolean   @default(true)
+  isArchived                Boolean   @default(false)
+  archivedAt                DateTime?
+  deletedAt                 DateTime?
+  allowClientCin7Edit       Boolean   @default(false)
+  autoCreateEnabled         Boolean   @default(true)
+  autoCreateThreshold       Float     @default(0.9)
+  allowClientEmailReconnect Boolean   @default(true)
+  maxOutlookConnections     Int       @default(1)
+  maxGmailConnections       Int       @default(1)
+  maxWhatsappConnections    Int       @default(0)
 
   users           User[]
   cin7            Cin7Connection?
@@ -46,18 +49,22 @@ model Company {
   customerAliases CustomerAlias[]
   orders          Order[]
   orderFeedback   OrderFeedback[]
+  activityLogs    ActivityLog[]
+  systemLogs      SystemLog[]
 }
 
 model User {
-  id                    String   @id @default(cuid())
-  email                 String   @unique
+  id                    String        @id @default(cuid())
+  email                 String        @unique
   passwordHash          String
   name                  String?
-  role                  String   @default("CLIENT")
-  sessionTimeoutMinutes Int      @default(720)
+  role                  String        @default("CLIENT")
+  sessionTimeoutMinutes Int           @default(720)
+  lastLoginAt           DateTime?
   companyId             String
-  company               Company  @relation(fields: [companyId], references: [id])
-  createdAt             DateTime @default(now())
+  company               Company       @relation(fields: [companyId], references: [id])
+  createdAt             DateTime      @default(now())
+  activityLogs          ActivityLog[]
 }
 
 model Cin7Connection {
@@ -226,4 +233,38 @@ model OrderFeedback {
   @@index([companyId, feedbackType])
   @@index([companyId, source])
   @@index([companyId, createdAt])
+}
+
+model ActivityLog {
+  id          String   @id @default(cuid())
+  companyId   String?
+  company     Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  actorEmail  String?
+  action      String
+  entityType  String?
+  entityId    String?
+  message     String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  @@index([companyId, createdAt])
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
+}
+
+model SystemLog {
+  id        String   @id @default(cuid())
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  level     String
+  source    String?
+  message   String
+  details   Json?
+  createdAt DateTime @default(now())
+
+  @@index([companyId, createdAt])
+  @@index([level, createdAt])
+  @@index([source, createdAt])
 }
