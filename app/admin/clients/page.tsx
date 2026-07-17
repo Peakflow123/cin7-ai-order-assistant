@@ -10,19 +10,37 @@ export default async function AdminClientsPage() {
 
   const companies = await prisma.company.findMany({
     orderBy: { createdAt: 'desc' },
-    include: { _count: { select: { users: true, orders: true, gmail: true, outlook: true } } }
+    include: { _count: { select: { users: true, orders: true, gmail: true, outlook: true, products: true, customers: true } } }
   });
 
   return (
     <main className="page-shell space-y-6">
-      <section className="hero-card"><Link href="/admin" className="text-sm font-bold text-blue-700">← Back to Admin</Link><h1 className="page-title mt-2">Clients</h1><p className="page-subtitle">Central client list. More client edit controls can be added here next.</p></section>
-      <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {companies.map((company) => (
-          <div key={company.id} className="card space-y-3">
-            <div className="flex items-start justify-between gap-2"><h2 className="text-xl font-black">{company.name}</h2><span className={company.isActive ? 'badge badge-green' : 'badge badge-red'}>{company.isActive ? 'Active' : 'Inactive'}</span></div>
-            <div className="grid grid-cols-2 gap-2 text-sm"><div className="soft-panel"><b>{company._count.users}</b><br />Users</div><div className="soft-panel"><b>{company._count.orders}</b><br />Orders</div><div className="soft-panel"><b>{company._count.gmail}</b><br />Gmail</div><div className="soft-panel"><b>{company._count.outlook}</b><br />Outlook</div></div>
-          </div>
-        ))}
+      <section className="hero-card flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div>
+          <Link href="/admin" className="text-sm font-bold text-blue-700">← Back to Admin Dashboard</Link>
+          <h1 className="page-title mt-2">Clients</h1>
+          <p className="page-subtitle">Compact overview of all client workspaces.</p>
+        </div>
+      </section>
+
+      <section className="card overflow-x-auto">
+        <table className="w-full min-w-[960px] text-left text-sm">
+          <thead className="table-head"><tr><th className="px-4 py-3">Client</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Users</th><th className="px-4 py-3">Orders</th><th className="px-4 py-3">Gmail</th><th className="px-4 py-3">Outlook</th><th className="px-4 py-3">Products</th><th className="px-4 py-3">Customers</th></tr></thead>
+          <tbody>
+            {companies.map((company) => (
+              <tr key={company.id} className="table-row">
+                <td className="px-4 py-4 font-black text-slate-950">{company.name}</td>
+                <td className="px-4 py-4"><span className={company.isActive ? 'badge badge-green' : 'badge badge-red'}>{company.isActive ? 'Active' : 'Inactive'}</span></td>
+                <td className="px-4 py-4">{company._count.users}</td>
+                <td className="px-4 py-4">{company._count.orders}</td>
+                <td className="px-4 py-4">{company._count.gmail}</td>
+                <td className="px-4 py-4">{company._count.outlook}</td>
+                <td className="px-4 py-4">{company._count.products}</td>
+                <td className="px-4 py-4">{company._count.customers}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </section>
     </main>
   );

@@ -15,7 +15,7 @@ export default async function Dashboard() {
   if (!session) redirect('/login');
   if (isPlatformAdmin(session)) redirect('/admin');
 
-  const company = await prisma.company.findUnique({ where: { id: session.companyId }, select: { name: true } });
+  const company = await prisma.company.findUnique({ where: { id: session.companyId }, select: { name: true, autoCreateEnabled: true, autoCreateThreshold: true } });
 
   const [needsReview, created, errors, gmailCount, outlookCount, recentOrders] = await Promise.all([
     prisma.order.count({ where: { companyId: session.companyId, status: { in: ['NEW', 'NEEDS_REVIEW', 'READY'] } } }),
@@ -31,26 +31,24 @@ export default async function Dashboard() {
       <section className="hero-card flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="page-title">{company?.name || 'Client'} Workspace</h1>
-          <p className="page-subtitle">Review AI-captured Gmail and Outlook orders, approve clean orders, and correct anything that needs attention.</p>
+          <p className="page-subtitle">A clean workspace for Gmail and Outlook order review, approval and Cin7 creation.</p>
+          <div className="mt-3 flex flex-wrap gap-2"><span className={company?.autoCreateEnabled ? 'badge badge-green' : 'badge badge-gray'}>{company?.autoCreateEnabled ? 'Auto-create enabled' : 'Auto-create off'}</span><span className="badge badge-blue">Threshold {Math.round((company?.autoCreateThreshold || 0) * 100)}%</span></div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Link className="btn" href="/mobile">Review Orders</Link>
-          <Link className="btn-secondary" href="/email">Manage Channels</Link>
-        </div>
+        <div className="flex flex-wrap gap-2"><Link className="btn" href="/mobile">Review Orders</Link><Link className="btn-secondary" href="/email">Channels</Link></div>
       </section>
 
       <section className="grid gap-4 md:grid-cols-5">
-        <div className="stat-card"><p className="text-sm font-bold text-slate-500">Needs Review</p><p className="mt-2 text-4xl font-black text-blue-700">{needsReview}</p></div>
-        <div className="stat-card"><p className="text-sm font-bold text-slate-500">Created</p><p className="mt-2 text-4xl font-black text-emerald-700">{created}</p></div>
-        <div className="stat-card"><p className="text-sm font-bold text-slate-500">Errors</p><p className="mt-2 text-4xl font-black text-rose-700">{errors}</p></div>
-        <div className="stat-card"><p className="text-sm font-bold text-slate-500">Gmail</p><p className="mt-2 text-4xl font-black">{gmailCount}</p></div>
-        <div className="stat-card"><p className="text-sm font-bold text-slate-500">Outlook</p><p className="mt-2 text-4xl font-black">{outlookCount}</p></div>
+        <Link className="stat-card" href="/mobile"><p className="text-sm font-bold text-slate-500">Needs Review</p><p className="mt-2 text-4xl font-black text-blue-700">{needsReview}</p></Link>
+        <Link className="stat-card" href="/orders?source="><p className="text-sm font-bold text-slate-500">Created</p><p className="mt-2 text-4xl font-black text-emerald-700">{created}</p></Link>
+        <Link className="stat-card" href="/orders"><p className="text-sm font-bold text-slate-500">Errors</p><p className="mt-2 text-4xl font-black text-rose-700">{errors}</p></Link>
+        <Link className="stat-card" href="/email"><p className="text-sm font-bold text-slate-500">Gmail</p><p className="mt-2 text-4xl font-black">{gmailCount}</p></Link>
+        <Link className="stat-card" href="/email"><p className="text-sm font-bold text-slate-500">Outlook</p><p className="mt-2 text-4xl font-black">{outlookCount}</p></Link>
       </section>
 
       <section className="grid gap-4 md:grid-cols-3">
-        <Link className="card transition hover:border-blue-200 hover:bg-blue-50" href="/mobile"><h2 className="text-xl font-black">Mobile Review</h2><p className="mt-2 text-slate-500">Approve and correct orders from phone or desktop.</p></Link>
-        <Link className="card transition hover:border-blue-200 hover:bg-blue-50" href="/orders"><h2 className="text-xl font-black">All Orders</h2><p className="mt-2 text-slate-500">Filter by status, Gmail, Outlook, mailbox or source.</p></Link>
-        <Link className="card transition hover:border-blue-200 hover:bg-blue-50" href="/settings"><h2 className="text-xl font-black">Cin7 Sync</h2><p className="mt-2 text-slate-500">Manage connection and refresh products/customers.</p></Link>
+        <Link className="card transition hover:border-blue-200 hover:bg-blue-50" href="/mobile"><h2 className="text-xl font-black">Review Queue</h2><p className="mt-2 leading-6 text-slate-500">Approve, correct or delete non-orders from phone or desktop.</p></Link>
+        <Link className="card transition hover:border-blue-200 hover:bg-blue-50" href="/orders"><h2 className="text-xl font-black">Order History</h2><p className="mt-2 leading-6 text-slate-500">Search and filter orders by channel, mailbox and status.</p></Link>
+        <Link className="card transition hover:border-blue-200 hover:bg-blue-50" href="/settings"><h2 className="text-xl font-black">Cin7 Data</h2><p className="mt-2 leading-6 text-slate-500">Refresh products/customers and manage the Cin7 connection.</p></Link>
       </section>
 
       <section className="card">

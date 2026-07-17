@@ -27,8 +27,8 @@ async function Header() {
   return (
     <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 md:px-6">
-        <Link href={session ? '/dashboard' : '/'} className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-teal-500 text-lg font-black text-white">N</div>
+        <Link href={session ? (admin ? '/admin' : '/dashboard') : '/'} className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-teal-500 text-lg font-black text-white shadow-sm">N</div>
           <div>
             <p className="text-lg font-black tracking-tight text-slate-950">NexOrder AI</p>
             <p className="text-xs font-medium text-slate-500">{admin ? 'Platform Admin' : company?.name || 'Order Automation'}</p>
