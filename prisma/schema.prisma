@@ -49,14 +49,15 @@ model Company {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  passwordHash String
-  name         String?
-  role         String   @default("CLIENT")
-  companyId    String
-  company      Company  @relation(fields: [companyId], references: [id])
-  createdAt    DateTime @default(now())
+  id                    String   @id @default(cuid())
+  email                 String   @unique
+  passwordHash          String
+  name                  String?
+  role                  String   @default("CLIENT")
+  sessionTimeoutMinutes Int      @default(720)
+  companyId             String
+  company               Company  @relation(fields: [companyId], references: [id])
+  createdAt             DateTime @default(now())
 }
 
 model Cin7Connection {

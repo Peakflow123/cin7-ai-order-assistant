@@ -1,91 +1,43 @@
-'use client';
+import Link from 'next/link';
+import { redirect } from 'next/navigation';
+import { getSession, isPlatformAdmin } from '@/lib/auth';
+import { prisma } from '@/lib/db';
+import SessionTimeoutClient from './SessionTimeoutClient';
 
-import { useEffect, useState } from 'react';
+export default async function SettingsPage() {
+  const session = getSession();
+  if (!session) redirect('/login');
+  if (isPlatformAdmin(session)) redirect('/admin');
 
-type Cin7Status = {
-  connected: boolean;
-  accountId: string | null;
-  canEdit: boolean;
-  message: string;
-};
+  const [company, user, cin7] = await Promise.all([
+    prisma.company.findUnique({ where: { id: session.companyId } }),
+    prisma.user.findUnique({ where: { id: session.userId } }),
+    prisma.cin7Connection.findUnique({ where: { companyId: session.companyId } })
+  ]);
 
-export default function Settings() {
-  const [accountId, setAccountId] = useState('');
-  const [apiKey, setApiKey] = useState('');
-  const [message, setMessage] = useState('');
-  const [status, setStatus] = useState<Cin7Status | null>(null);
-
-  async function loadStatus() {
-    const response = await fetch('/api/cin7/status');
-    const data = await response.json();
-    setStatus(data);
-    if (data.accountId) setAccountId(data.accountId);
-  }
-
-  useEffect(() => {
-    void loadStatus();
-  }, []);
-
-  async function save() {
-    setMessage('Saving...');
-    const response = await fetch('/api/cin7/save', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ accountId, apiKey })
-    });
-    const text = await response.text();
-    setMessage(text);
-    await loadStatus();
-  }
-
-  async function sync() {
-    setMessage('Refreshing products/customers from Cin7...');
-    const response = await fetch('/api/cin7/sync', { method: 'POST' });
-    setMessage(await response.text());
-  }
-
-  if (!status) return <main className="p-6">Loading...</main>;
+  if (!company || !user) redirect('/login');
 
   return (
-    <main className="p-6 max-w-3xl mx-auto">
-      <div className="card space-y-4">
-        <h1 className="text-2xl font-bold">Cin7 Connection</h1>
+    <main className="page-shell space-y-6">
+      <section className="hero-card">
+        <Link href="/dashboard" className="text-sm font-bold text-blue-700">← Back to Dashboard</Link>
+        <h1 className="page-title mt-2">Settings</h1>
+        <p className="page-subtitle">Manage session security and Cin7 connection settings.</p>
+      </section>
 
-        {status.connected && (
-          <div className="rounded-xl bg-green-50 border border-green-200 p-3 text-green-800">
-            Cin7 is connected. Clients can refresh products/customers, but cannot replace API credentials unless admin allows it.
-          </div>
-        )}
+      <SessionTimeoutClient current={user.sessionTimeoutMinutes} />
 
-        {!status.canEdit && (
-          <div className="rounded-xl bg-yellow-50 border border-yellow-200 p-3 text-yellow-800">
-            API credentials are locked. Please ask platform admin to change Cin7 credentials.
-          </div>
-        )}
-
-        <input
-          className="input"
-          placeholder="Cin7 Account ID"
-          value={accountId}
-          disabled={!status.canEdit}
-          onChange={(event) => setAccountId(event.target.value)}
-        />
-
-        <input
-          className="input"
-          placeholder={status.connected ? 'API Key is saved. Enter new key only if admin allows changes.' : 'Cin7 API Key'}
-          value={apiKey}
-          disabled={!status.canEdit}
-          onChange={(event) => setApiKey(event.target.value)}
-        />
-
-        <div className="flex gap-3">
-          {status.canEdit && <button className="btn" onClick={save}>Save Cin7 Credentials</button>}
-          <button className="btn" onClick={sync}>Refresh Products/Customers</button>
+      <section className="card space-y-4">
+        <div>
+          <h2 className="text-xl font-black">Cin7 Connection</h2>
+          <p className="page-subtitle">Cin7 setup remains controlled based on admin permissions.</p>
         </div>
-
-        <p className="whitespace-pre-wrap">{message}</p>
-      </div>
+        <div className="soft-panel">
+          <p className="font-bold">Status: {cin7 ? 'Connected' : 'Not connected'}</p>
+          <p className="mt-1 text-sm text-slate-500">Client edit allowed: {company.allowClientCin7Edit ? 'Yes' : 'No'}</p>
+        </div>
+        <Link className="btn-secondary w-full md:w-auto" href="/settings/cin7">Open Cin7 Settings</Link>
+      </section>
     </main>
   );
 }

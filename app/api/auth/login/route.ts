@@ -1,28 +1,25 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
 import bcrypt from 'bcryptjs';
 import { prisma } from '@/lib/db';
-import { isPlatformAdminEmail, signSession } from '@/lib/auth';
+import { setSessionCookie } from '@/lib/auth';
 
 export async function POST(request: Request) {
-  const body = await request.json();
-  const user = await prisma.user.findUnique({ where: { email: body.email }, include: { company: true } });
+  const body = await request.formData().catch(() => null);
+  const jsonBody = body ? null : await request.json().catch(() => ({}));
 
-  if (!user || !(await bcrypt.compare(body.password, user.passwordHash))) {
-    return new NextResponse('Invalid login', { status: 401 });
-  }
+  const email = String(body?.get('email') || jsonBody?.email || '').trim().toLowerCase();
+  const password = String(body?.get('password') || jsonBody?.password || '');
 
-  const role = user.role === 'PLATFORM_ADMIN' || isPlatformAdminEmail(user.email) ? 'PLATFORM_ADMIN' : user.role;
+  if (!email || !password) return new NextResponse('Email and password are required.', { status: 400 });
 
-  if (!user.company.isActive && role !== 'PLATFORM_ADMIN') {
-    return new NextResponse('This client account is inactive. Please contact platform admin.', { status: 403 });
-  }
+  const user = await prisma.user.findUnique({ where: { email }, include: { company: true } });
+  if (!user || !user.company.isActive) return new NextResponse('Invalid login or inactive account.', { status: 401 });
 
-  cookies().set('session', signSession({ userId: user.id, companyId: user.companyId, email: user.email, role }), {
-    httpOnly: true,
-    path: '/',
-    sameSite: 'lax'
-  });
+  const ok = await bcrypt.compare(password, user.passwordHash);
+  if (!ok) return new NextResponse('Invalid login.', { status: 401 });
 
-  return new NextResponse('ok');
+  setSessionCookie({ userId: user.id, companyId: user.companyId, email: user.email, role: user.role }, user.sessionTimeoutMinutes);
+
+  const redirectUrl = user.role === 'ADMIN' || user.role === 'PLATFORM_ADMIN' ? '/admin' : '/dashboard';
+  return NextResponse.redirect(new URL(redirectUrl, process.env.NEXT_PUBLIC_APP_URL || request.url));
 }

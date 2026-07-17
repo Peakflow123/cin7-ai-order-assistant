@@ -1,50 +1,73 @@
-import jwt from 'jsonwebtoken';
 import { cookies } from 'next/headers';
+import crypto from 'crypto';
 
 export type Session = {
   userId: string;
   companyId: string;
   email: string;
-  role?: string;
+  role: string;
+  exp?: number;
 };
 
-export function isPlatformAdminEmail(email: string) {
-  const adminEmails = (process.env.PLATFORM_ADMIN_EMAILS || '')
-    .split(',')
-    .map((value) => value.trim().toLowerCase())
-    .filter(Boolean);
+const COOKIE_NAME = 'session';
 
-  return adminEmails.includes(email.trim().toLowerCase());
+function secret() {
+  return process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET || 'dev-secret-change-me';
 }
 
-export function signSession(session: Session) {
-  return jwt.sign(session, process.env.JWT_SECRET || 'dev-secret', { expiresIn: '7d' });
+function sign(payload: string) {
+  return crypto.createHmac('sha256', secret()).update(payload).digest('hex');
 }
 
-export function getSession(): Session | null {
-  const token = cookies().get('session')?.value;
-  if (!token) return null;
+export function createSessionCookie(session: Omit<Session, 'exp'>, timeoutMinutes: number) {
+  const exp = timeoutMinutes > 0 ? Date.now() + timeoutMinutes * 60 * 1000 : 0;
+  const payload = Buffer.from(JSON.stringify({ ...session, exp })).toString('base64url');
+  return `${payload}.${sign(payload)}`;
+}
+
+function parseCookie(value?: string): Session | null {
+  if (!value) return null;
+  const [payload, signature] = value.split('.');
+  if (!payload || !signature || sign(payload) !== signature) return null;
 
   try {
-    return jwt.verify(token, process.env.JWT_SECRET || 'dev-secret') as Session;
+    const session = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as Session;
+    if (session.exp && session.exp > 0 && Date.now() > session.exp) return null;
+    return session;
   } catch {
     return null;
   }
 }
 
+export function getSession() {
+  return parseCookie(cookies().get(COOKIE_NAME)?.value);
+}
+
 export function requireSession() {
   const session = getSession();
-  if (!session) throw new Error('Not authenticated');
+  if (!session) throw new Error('Unauthorized');
   return session;
 }
 
 export function isPlatformAdmin(session: Session | null) {
-  if (!session) return false;
-  return session.role === 'PLATFORM_ADMIN' || isPlatformAdminEmail(session.email);
+  return session?.role === 'ADMIN' || session?.role === 'PLATFORM_ADMIN';
 }
 
-export function requirePlatformAdmin() {
-  const session = requireSession();
-  if (!isPlatformAdmin(session)) throw new Error('Not authorised');
-  return session;
+export function setSessionCookie(session: Omit<Session, 'exp'>, timeoutMinutes: number) {
+  const maxAge = timeoutMinutes > 0 ? timeoutMinutes * 60 : 60 * 60 * 24 * 365;
+  cookies().set(COOKIE_NAME, createSessionCookie(session, timeoutMinutes), {
+    httpOnly: true,
+    path: '/',
+    sameSite: 'lax',
+    maxAge
+  });
+}
+
+export function clearSessionCookie() {
+  cookies().set(COOKIE_NAME, '', {
+    httpOnly: true,
+    path: '/',
+    sameSite: 'lax',
+    maxAge: 0
+  });
 }
