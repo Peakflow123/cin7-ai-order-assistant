@@ -74,11 +74,5 @@ export async function getCompanyUsage(companyId: string) {
 
 export async function getAllCompanyUsage() {
   const companies = await prisma.company.findMany({ orderBy: { createdAt: 'desc' } });
-  const rows = [];
-
-  for (const company of companies) {
-    rows.push({ company, usage: await getCompanyUsage(company.id) });
-  }
-
-  return rows;
+  return Promise.all(companies.map(async (company) => ({ company, usage: await getCompanyUsage(company.id) })));
 }

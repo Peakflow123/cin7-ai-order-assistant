@@ -1,47 +1,58 @@
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getSession, isPlatformAdmin } from '@/lib/auth';
 import { prisma } from '@/lib/db';
+import AdminNav from '../AdminNav';
+import AdminClientControls from '../AdminClientControls';
+import ClientLifecycleButtons from '../ClientLifecycleButtons';
+import { getAllCompanyUsage } from '@/lib/admin-metrics';
 
 export default async function AdminClientsPage() {
   const session = getSession();
   if (!session) redirect('/login');
   if (!isPlatformAdmin(session)) redirect('/dashboard');
 
-  const companies = await prisma.company.findMany({
-    orderBy: { createdAt: 'desc' },
-    include: { _count: { select: { users: true, orders: true, gmail: true, outlook: true, products: true, customers: true } } }
-  });
+  const [companies, usageRows] = await Promise.all([
+    prisma.company.findMany({ orderBy: { createdAt: 'desc' }, include: { _count: { select: { users: true, orders: true, gmail: true, outlook: true, products: true, customers: true } } } }),
+    getAllCompanyUsage()
+  ]);
+
+  const usageByCompany = new Map(usageRows.map((row) => [row.company.id, row.usage]));
 
   return (
-    <main className="page-shell space-y-6">
-      <section className="hero-card flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <Link href="/admin" className="text-sm font-bold text-blue-700">← Back to Admin Dashboard</Link>
-          <h1 className="page-title mt-2">Clients</h1>
-          <p className="page-subtitle">Compact overview of all client workspaces.</p>
-        </div>
-      </section>
+    <main className="page-shell">
+      <div className="admin-shell">
+        <AdminNav active="/admin/clients" />
+        <section className="space-y-6 min-w-0">
+          <section className="hero-card">
+            <h1 className="page-title">Clients & Controls</h1>
+            <p className="page-subtitle">Real navigation page for client lifecycle, limits and automation controls.</p>
+          </section>
 
-      <section className="card overflow-x-auto">
-        <table className="w-full min-w-[960px] text-left text-sm">
-          <thead className="table-head"><tr><th className="px-4 py-3">Client</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Users</th><th className="px-4 py-3">Orders</th><th className="px-4 py-3">Gmail</th><th className="px-4 py-3">Outlook</th><th className="px-4 py-3">Products</th><th className="px-4 py-3">Customers</th></tr></thead>
-          <tbody>
-            {companies.map((company) => (
-              <tr key={company.id} className="table-row">
-                <td className="px-4 py-4 font-black text-slate-950">{company.name}</td>
-                <td className="px-4 py-4"><span className={company.isActive ? 'badge badge-green' : 'badge badge-red'}>{company.isActive ? 'Active' : 'Inactive'}</span></td>
-                <td className="px-4 py-4">{company._count.users}</td>
-                <td className="px-4 py-4">{company._count.orders}</td>
-                <td className="px-4 py-4">{company._count.gmail}</td>
-                <td className="px-4 py-4">{company._count.outlook}</td>
-                <td className="px-4 py-4">{company._count.products}</td>
-                <td className="px-4 py-4">{company._count.customers}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
+          <section className="space-y-4">
+            {companies.map((company) => {
+              const usage = usageByCompany.get(company.id);
+              return (
+                <article key={company.id} className="admin-panel space-y-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <h2 className="text-xl font-black">{company.name}</h2>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <span className={company.isArchived ? 'badge badge-yellow' : company.isActive ? 'badge badge-green' : 'badge badge-red'}>{company.isArchived ? 'Archived' : company.isActive ? 'Active' : 'Inactive'}</span>
+                        <span className="badge badge-blue">Storage {usage?.estimatedStorage || '0 B'}</span>
+                        <span className="badge badge-gray">{company._count.users} users</span>
+                        <span className="badge badge-gray">{company._count.orders} orders</span>
+                      </div>
+                    </div>
+                    <ClientLifecycleButtons companyId={company.id} companyName={company.name} isActive={company.isActive} isArchived={company.isArchived} />
+                  </div>
+                </article>
+              );
+            })}
+          </section>
+
+          <AdminClientControls companies={companies} />
+        </section>
+      </div>
     </main>
   );
 }
