@@ -27,12 +27,18 @@ export function createSessionCookie(session: Omit<Session, 'exp'>, timeoutMinute
 
 function parseCookie(value?: string): Session | null {
   if (!value) return null;
+
   const [payload, signature] = value.split('.');
   if (!payload || !signature || sign(payload) !== signature) return null;
 
   try {
     const session = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as Session;
-    if (session.exp && session.exp > 0 && Date.now() > session.exp) return null;
+
+    if (session.exp && session.exp > 0 && Date.now() > session.exp) {
+      clearSessionCookie();
+      return null;
+    }
+
     return session;
   } catch {
     return null;
@@ -53,8 +59,19 @@ export function isPlatformAdmin(session: Session | null) {
   return session?.role === 'ADMIN' || session?.role === 'PLATFORM_ADMIN';
 }
 
+export function requirePlatformAdmin() {
+  const session = requireSession();
+
+  if (!isPlatformAdmin(session)) {
+    throw new Error('Forbidden');
+  }
+
+  return session;
+}
+
 export function setSessionCookie(session: Omit<Session, 'exp'>, timeoutMinutes: number) {
   const maxAge = timeoutMinutes > 0 ? timeoutMinutes * 60 : 60 * 60 * 24 * 365;
+
   cookies().set(COOKIE_NAME, createSessionCookie(session, timeoutMinutes), {
     httpOnly: true,
     path: '/',
