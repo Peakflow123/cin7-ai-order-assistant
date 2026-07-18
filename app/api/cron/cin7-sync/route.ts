@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
-import { syncDueCin7Companies } from '@/lib/cin7-sync';
+import { runDueCin7SyncJobs } from '@/lib/cin7-sync-job';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+export const maxDuration = 30;
 
 export async function GET(request: Request) {
   const cronSecret = process.env.CRON_SECRET;
@@ -11,6 +11,6 @@ export async function GET(request: Request) {
   if (!cronSecret) return NextResponse.json({ message: 'CRON_SECRET is missing in Vercel environment variables.' }, { status: 500 });
   if (authHeader !== `Bearer ${cronSecret}`) return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
 
-  const results = await syncDueCin7Companies();
-  return NextResponse.json({ ok: true, checkedAt: new Date().toISOString(), companiesChecked: results.length, results });
+  const results = await runDueCin7SyncJobs();
+  return NextResponse.json({ ok: true, checkedAt: new Date().toISOString(), jobsProcessed: results.length, results });
 }

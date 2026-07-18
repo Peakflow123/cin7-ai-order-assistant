@@ -33,7 +33,6 @@ export default async function SettingsPage() {
         canEdit={company.allowClientCin7Edit}
         hasConnection={Boolean(cin7)}
         accountId={cin7?.accountId || ''}
-        baseUrl={cin7?.baseUrl || 'https://inventory.dearsystems.com/ExternalApi/v2'}
         lastStatus={syncState?.lastSyncStatus || null}
         lastMessage={syncState?.lastSyncMessage || null}
         lastProductsSync={syncState?.productsLastSyncedAt?.toISOString() || null}

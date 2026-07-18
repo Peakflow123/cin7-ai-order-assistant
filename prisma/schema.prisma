@@ -42,6 +42,7 @@ model Company {
   users           User[]
   cin7            Cin7Connection?
   syncState       IntegrationSyncState?
+  cin7SyncJobs    Cin7SyncJob[]
   outlook         OutlookConnection[]
   gmail           GmailConnection[]
   products        Product[]
@@ -88,6 +89,33 @@ model IntegrationSyncState {
   lastSyncMessage       String?
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
+}
+
+model Cin7SyncJob {
+  id               String   @id @default(cuid())
+  companyId        String
+  company          Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  status           String   @default("PENDING")
+  phase            String   @default("products")
+  page             Int      @default(1)
+  mode             String   @default("manual-client")
+  message          String?
+  error            String?
+  productsFetched  Int      @default(0)
+  productsCreated  Int      @default(0)
+  productsUpdated  Int      @default(0)
+  productsSkipped  Int      @default(0)
+  customersFetched Int      @default(0)
+  customersCreated Int      @default(0)
+  customersUpdated Int      @default(0)
+  customersSkipped Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  startedAt        DateTime?
+  finishedAt       DateTime?
+
+  @@index([companyId, status])
+  @@index([status, updatedAt])
 }
 
 model OutlookConnection {
