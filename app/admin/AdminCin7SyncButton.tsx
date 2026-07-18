@@ -9,7 +9,9 @@ export default function AdminCin7SyncButton({ companyId, hasCin7 }: { companyId:
     setSyncing(true);
     try {
       const response = await fetch(`/api/admin/companies/${companyId}/cin7-refresh`, { method: 'POST' });
-      const data = await response.json().catch(async () => ({ message: await response.text() }));
+      const text = await response.text();
+      let data: any = {};
+      try { data = text ? JSON.parse(text) : {}; } catch { data = { message: text }; }
       setSyncing(false);
 
       if (!response.ok) {

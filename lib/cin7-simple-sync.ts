@@ -5,14 +5,18 @@ import type { Session } from '@/lib/auth';
 
 const DEFAULT_BASE_URL = 'https://inventory.dearsystems.com/ExternalApi/v2';
 const PAGE_LIMIT = 500;
-const MAX_PAGES = 20;
+const MAX_PAGES = 25;
+
+type SyncSource = 'client-manual' | 'admin-manual';
+
+type Cin7Entity = 'Product' | 'Customer';
 
 function normalizeBaseUrl(baseUrl?: string | null) {
   return String(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, '');
 }
 
 function getId(item: Record<string, any>) {
-  return String(item.ID || item.Id || item.id || '').trim();
+  return String(item.ID || item.Id || item.id || item.ProductID || item.CustomerID || item.ProductId || item.CustomerId || '').trim();
 }
 
 function getModifiedDate(item: Record<string, any>) {
@@ -21,26 +25,32 @@ function getModifiedDate(item: Record<string, any>) {
   return date && !Number.isNaN(date.getTime()) ? date : null;
 }
 
-function listFromResponse(data: any, key: 'Product' | 'Customer') {
+function listFromResponse(data: any, entity: Cin7Entity) {
   if (Array.isArray(data)) return data;
-  if (key === 'Product') {
+
+  if (entity === 'Product') {
     if (Array.isArray(data.Products)) return data.Products;
     if (Array.isArray(data.ProductList)) return data.ProductList;
+    if (Array.isArray(data.Product)) return data.Product;
   }
-  if (key === 'Customer') {
+
+  if (entity === 'Customer') {
     if (Array.isArray(data.Customers)) return data.Customers;
     if (Array.isArray(data.CustomerList)) return data.CustomerList;
+    if (Array.isArray(data.Customer)) return data.Customer;
   }
+
   if (Array.isArray(data.Items)) return data.Items;
+  if (Array.isArray(data.Data)) return data.Data;
   return [];
 }
 
-async function cin7Get(connection: any, endpoint: 'Product' | 'Customer', page: number, since?: Date | null) {
+async function cin7Get(connection: any, endpoint: Cin7Entity, page: number, since?: Date | null) {
   const url = new URL(`${normalizeBaseUrl(connection.baseUrl)}/${endpoint}`);
   url.searchParams.set('Page', String(page));
   url.searchParams.set('Limit', String(PAGE_LIMIT));
 
-  // Cin7 Core may or may not honor this filter on all tenants/endpoints. Upsert still prevents duplicates.
+  // Kept simple. If Cin7 Core honors this, only changed records are returned. If not, upsert still prevents duplicates.
   if (since) url.searchParams.set('LastModifiedOn', since.toISOString());
 
   const response = await fetch(url.toString(), {
@@ -53,7 +63,10 @@ async function cin7Get(connection: any, endpoint: 'Product' | 'Customer', page: 
   });
 
   const text = await response.text();
-  if (!response.ok) throw new Error(`Cin7 Core ${endpoint} API error ${response.status}: ${text.slice(0, 500)}`);
+  if (!response.ok) {
+    throw new Error(`Cin7 Core ${endpoint} API error ${response.status}: ${text.slice(0, 500)}`);
+  }
+
   return text ? JSON.parse(text) : {};
 }
 
@@ -76,6 +89,7 @@ async function syncProducts(companyId: string, connection: any, since?: Date | n
       if (since && modified && modified <= since) { skipped += 1; continue; }
 
       const existing = await prisma.product.findUnique({ where: { companyId_cin7Id: { companyId, cin7Id } } });
+
       await prisma.product.upsert({
         where: { companyId_cin7Id: { companyId, cin7Id } },
         update: {
@@ -154,13 +168,13 @@ async function syncCustomers(companyId: string, connection: any, since?: Date | 
   return { fetched, created, updated, skipped };
 }
 
-export async function syncCin7ProductsCustomers(companyId: string, options: { session?: Session | null; force?: boolean; source: 'client-manual' | 'admin-manual' | 'auto-24h' }) {
+export async function syncCin7ProductsCustomers(companyId: string, options: { session?: Session | null; source: SyncSource }) {
   const connection = await prisma.cin7Connection.findUnique({ where: { companyId } });
   if (!connection) throw new Error('Cin7 Core connection is not configured for this client.');
 
   const previous = await prisma.integrationSyncState.findUnique({ where: { companyId } }).catch(() => null);
-  const productSince = options.force ? null : previous?.productsLastSyncedAt || null;
-  const customerSince = options.force ? null : previous?.customersLastSyncedAt || null;
+  const productSince = previous?.productsLastSyncedAt || null;
+  const customerSince = previous?.customersLastSyncedAt || null;
   const startedAt = new Date();
 
   const products = await syncProducts(companyId, connection, productSince);
@@ -187,42 +201,11 @@ export async function syncCin7ProductsCustomers(companyId: string, options: { se
   await logActivity({
     session: options.session || null,
     companyId,
-    action: options.source === 'auto-24h' ? 'CIN7_AUTO_SYNC_COMPLETED' : 'CIN7_MANUAL_SYNC_COMPLETED',
+    action: 'CIN7_MANUAL_SYNC_COMPLETED',
     entityType: 'Cin7Connection',
     message,
     metadata: { products, customers, source: options.source }
   });
 
   return { ok: true, products, customers, message, syncedAt: startedAt.toISOString() };
-}
-
-export async function syncDueCin7Companies() {
-  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const companies = await prisma.company.findMany({
-    where: {
-      isActive: true,
-      isArchived: false,
-      cin7: { isNot: null },
-      OR: [
-        { syncState: null },
-        { syncState: { productsLastSyncedAt: null } },
-        { syncState: { productsLastSyncedAt: { lt: cutoff } } }
-      ]
-    },
-    select: { id: true, name: true },
-    take: 3
-  });
-
-  const results: any[] = [];
-  for (const company of companies) {
-    try {
-      const result = await syncCin7ProductsCustomers(company.id, { source: 'auto-24h' });
-      results.push({ companyId: company.id, companyName: company.name, ok: true, result });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown Cin7 Core sync error';
-      await logSystem({ companyId: company.id, level: 'ERROR', source: 'cin7-auto-sync', message, details: { companyId: company.id } });
-      results.push({ companyId: company.id, companyName: company.name, ok: false, message });
-    }
-  }
-  return results;
 }
