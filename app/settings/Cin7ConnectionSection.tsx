@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 type Props = {
   canEdit: boolean;
@@ -33,24 +33,32 @@ function jobSummary(job: Job) {
   return `Products: ${job.productsCreated} created, ${job.productsUpdated} updated, ${job.productsSkipped} skipped. Customers: ${job.customersCreated} created, ${job.customersUpdated} updated, ${job.customersSkipped} skipped.`;
 }
 
-export default function Cin7ConnectionSection({
-  canEdit,
-  hasConnection,
-  accountId,
-  lastStatus,
-  lastMessage,
-  lastProductsSync,
-  lastCustomersSync
-}: Props) {
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export default function Cin7ConnectionSection({ canEdit, hasConnection, accountId, lastStatus, lastMessage, lastProductsSync, lastCustomersSync }: Props) {
   const [account, setAccount] = useState(accountId || '');
   const [apiKey, setApiKey] = useState('');
   const [message, setMessage] = useState('');
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [job, setJob] = useState<Job | null>(null);
+  const cancelledRef = useRef(false);
 
   const locked = hasConnection && !canEdit;
   const showFields = !hasConnection || canEdit;
+
+  useEffect(() => {
+    cancelledRef.current = false;
+    return () => { cancelledRef.current = true; };
+  }, []);
 
   async function save() {
     setSaving(true);
@@ -68,42 +76,62 @@ export default function Cin7ConnectionSection({
     if (response.ok) setApiKey('');
   }
 
+  async function getJob(jobId: string) {
+    const response = await fetch(`/api/sync-jobs/${jobId}`, { method: 'GET', cache: 'no-store' });
+    if (!response.ok) return null;
+    return await response.json() as Job;
+  }
+
+  async function runOneStep(jobId: string) {
+    const response = await fetchWithTimeout(`/api/sync-jobs/${jobId}/run`, { method: 'POST' }, 25000);
+    const data = await response.json().catch(async () => ({ message: await response.text() })) as Job | { message?: string };
+
+    if (!response.ok) {
+      throw new Error('message' in data && data.message ? data.message : 'Cin7 refresh failed.');
+    }
+
+    return data as Job;
+  }
+
   async function runJob(jobId: string) {
-    for (let i = 0; i < 300; i += 1) {
-      const response = await fetch(`/api/sync-jobs/${jobId}/run`, { method: 'POST' });
-      const data = await response.json().catch(async () => ({ message: await response.text() })) as Job | { message?: string };
+    for (let i = 0; i < 500; i += 1) {
+      if (cancelledRef.current) return;
 
-      if (!response.ok) {
-        setMessage('message' in data && data.message ? data.message : 'Cin7 refresh failed.');
+      try {
+        setMessage('Processing next small batch...');
+        const current = await runOneStep(jobId);
+        setJob(current);
+        setMessage(current.message || `Refreshing ${current.phase}, page ${current.page}...`);
+
+        if (current.status === 'COMPLETED') {
+          setMessage(`Refresh complete. ${jobSummary(current)}`);
+          setSyncing(false);
+          return;
+        }
+
+        if (current.status === 'FAILED') {
+          setMessage(current.error || 'Cin7 refresh failed.');
+          setSyncing(false);
+          return;
+        }
+
+        if (current.status === 'PAUSED') {
+          setMessage(current.error || 'Cin7 Core rate limit reached. Waiting before continuing...');
+          await new Promise((resolve) => setTimeout(resolve, 60000));
+        } else {
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+        }
+      } catch (error) {
+        const latest = await getJob(jobId);
+        if (latest) setJob(latest);
+
+        setMessage(error instanceof Error ? error.message : 'Cin7 refresh failed. Please check admin logs or try again later.');
         setSyncing(false);
         return;
-      }
-
-      const current = data as Job;
-      setJob(current);
-      setMessage(current.message || `Refreshing ${current.phase}, page ${current.page}...`);
-
-      if (current.status === 'COMPLETED') {
-        setMessage(`Refresh complete. ${jobSummary(current)}`);
-        setSyncing(false);
-        return;
-      }
-
-      if (current.status === 'FAILED') {
-        setMessage(current.error || 'Cin7 refresh failed.');
-        setSyncing(false);
-        return;
-      }
-
-      if (current.status === 'PAUSED') {
-        setMessage(current.error || 'Cin7 rate limit reached. Waiting before continuing...');
-        await new Promise((resolve) => setTimeout(resolve, 60000));
-      } else {
-        await new Promise((resolve) => setTimeout(resolve, 1200));
       }
     }
 
-    setMessage('Cin7 refresh is still running. You can leave this page and check back later.');
+    setMessage('Cin7 refresh is still running. You can leave this page and continue later.');
     setSyncing(false);
   }
 
@@ -111,27 +139,31 @@ export default function Cin7ConnectionSection({
     setSyncing(true);
     setMessage('Starting Cin7 product/customer refresh...');
 
-    const response = await fetch('/api/settings/cin7/sync/start', { method: 'POST' });
-    const data = await response.json().catch(async () => ({ message: await response.text() })) as Job | { message?: string };
+    try {
+      const response = await fetchWithTimeout('/api/settings/cin7/sync/start', { method: 'POST' }, 15000);
+      const data = await response.json().catch(async () => ({ message: await response.text() })) as Job | { message?: string };
 
-    if (!response.ok) {
-      setMessage('message' in data && data.message ? data.message : 'Could not start Cin7 refresh.');
+      if (!response.ok) {
+        setMessage('message' in data && data.message ? data.message : 'Could not start Cin7 refresh.');
+        setSyncing(false);
+        return;
+      }
+
+      const startedJob = data as Job;
+      setJob(startedJob);
+      setMessage(startedJob.message || 'Sync job started. Processing first batch...');
+      await runJob(startedJob.id);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not start Cin7 refresh.');
       setSyncing(false);
-      return;
     }
-
-    const startedJob = data as Job;
-    setJob(startedJob);
-    await runJob(startedJob.id);
   }
 
   return (
     <section className="card space-y-5">
       <div>
         <h2 className="text-xl font-black">Cin7 Connection</h2>
-        <p className="page-subtitle">
-          Connect once, then refresh products and customers when needed. Base URL is hidden and handled by the system.
-        </p>
+        <p className="page-subtitle">Connect once, then refresh products and customers when needed. Base URL is hidden and handled by the system.</p>
       </div>
 
       {locked && (
@@ -144,52 +176,22 @@ export default function Cin7ConnectionSection({
 
       {showFields && (
         <div className="space-y-4">
-          <label>
-            <span className="section-label">Cin7 Account ID</span>
-            <input className="input mt-1" value={account} onChange={(event) => setAccount(event.target.value)} placeholder="Cin7 Account ID" />
-          </label>
-
-          <label className="block">
-            <span className="section-label">API Key {hasConnection ? '(leave blank to keep existing key)' : ''}</span>
-            <input className="input mt-1" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Cin7 API Key" />
-          </label>
-
-          <button className="btn" disabled={saving} onClick={save}>
-            {saving ? 'Saving...' : hasConnection ? 'Update Cin7 Connection' : 'Save Cin7 Connection'}
-          </button>
+          <label><span className="section-label">Cin7 Account ID</span><input className="input mt-1" value={account} onChange={(event) => setAccount(event.target.value)} placeholder="Cin7 Account ID" /></label>
+          <label className="block"><span className="section-label">API Key {hasConnection ? '(leave blank to keep existing key)' : ''}</span><input className="input mt-1" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Cin7 API Key" /></label>
+          <button className="btn" disabled={saving} onClick={save}>{saving ? 'Saving...' : hasConnection ? 'Update Cin7 Connection' : 'Save Cin7 Connection'}</button>
         </div>
       )}
 
       <div className="grid gap-3 md:grid-cols-2">
-        <div className="soft-panel">
-          <p className="font-bold">Last Product Sync</p>
-          <p className="text-sm text-slate-500">{lastProductsSync ? new Date(lastProductsSync).toLocaleString() : 'Never'}</p>
-        </div>
-        <div className="soft-panel">
-          <p className="font-bold">Last Customer Sync</p>
-          <p className="text-sm text-slate-500">{lastCustomersSync ? new Date(lastCustomersSync).toLocaleString() : 'Never'}</p>
-        </div>
+        <div className="soft-panel"><p className="font-bold">Last Product Sync</p><p className="text-sm text-slate-500">{lastProductsSync ? new Date(lastProductsSync).toLocaleString() : 'Never'}</p></div>
+        <div className="soft-panel"><p className="font-bold">Last Customer Sync</p><p className="text-sm text-slate-500">{lastCustomersSync ? new Date(lastCustomersSync).toLocaleString() : 'Never'}</p></div>
       </div>
 
-      {lastMessage && (
-        <div className="soft-panel">
-          <p className="font-bold">Last Sync Status: {lastStatus || 'Unknown'}</p>
-          <p className="text-sm text-slate-600">{lastMessage}</p>
-        </div>
-      )}
+      {lastMessage && <div className="soft-panel"><p className="font-bold">Last Sync Status: {lastStatus || 'Unknown'}</p><p className="text-sm text-slate-600">{lastMessage}</p></div>}
 
-      <button className="btn-secondary w-full md:w-auto" disabled={syncing || !hasConnection} onClick={refresh}>
-        {syncing ? 'Refreshing...' : 'Refresh Products & Customers'}
-      </button>
+      <button className="btn-secondary w-full md:w-auto" disabled={syncing || !hasConnection} onClick={refresh}>{syncing ? 'Refreshing...' : 'Refresh Products & Customers'}</button>
 
-      {job && (
-        <div className="soft-panel">
-          <p className="font-bold">Current refresh</p>
-          <p className="text-sm text-slate-500">Status: {job.status} • Step: {job.phase} • Page: {job.page}</p>
-          <p className="mt-1 text-sm text-slate-500">{jobSummary(job)}</p>
-        </div>
-      )}
-
+      {job && <div className="soft-panel"><p className="font-bold">Current refresh</p><p className="text-sm text-slate-500">Status: {job.status} • Step: {job.phase} • Page: {job.page}</p><p className="mt-1 text-sm text-slate-500">{jobSummary(job)}</p></div>}
       {message && <p className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-semibold text-slate-700">{message}</p>}
     </section>
   );

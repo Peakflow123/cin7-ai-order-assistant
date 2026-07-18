@@ -21,53 +21,76 @@ function jobSummary(job: Job) {
   return `Products: ${job.productsCreated} created, ${job.productsUpdated} updated, ${job.productsSkipped} skipped. Customers: ${job.customersCreated} created, ${job.customersUpdated} updated, ${job.customersSkipped} skipped.`;
 }
 
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export default function AdminCin7SyncButton({ companyId, hasCin7 }: { companyId: string; hasCin7: boolean }) {
   const [syncing, setSyncing] = useState(false);
 
   async function runJob(jobId: string) {
-    for (let i = 0; i < 300; i += 1) {
-      const response = await fetch(`/api/sync-jobs/${jobId}/run`, { method: 'POST' });
-      const data = await response.json().catch(async () => ({ message: await response.text() }));
+    for (let i = 0; i < 500; i += 1) {
+      try {
+        const response = await fetchWithTimeout(`/api/sync-jobs/${jobId}/run`, { method: 'POST' }, 25000);
+        const data = await response.json().catch(async () => ({ message: await response.text() })) as Job | { message?: string };
 
-      if (!response.ok) {
-        alert(data.message || 'Cin7 refresh failed.');
+        if (!response.ok) {
+          alert('message' in data && data.message ? data.message : 'Cin7 refresh failed.');
+          setSyncing(false);
+          return;
+        }
+
+        const current = data as Job;
+        if (current.status === 'COMPLETED') {
+          alert(`Cin7 refresh complete. ${jobSummary(current)}`);
+          setSyncing(false);
+          window.location.reload();
+          return;
+        }
+
+        if (current.status === 'FAILED') {
+          alert(current.error || 'Cin7 refresh failed.');
+          setSyncing(false);
+          return;
+        }
+
+        if (current.status === 'PAUSED') await new Promise((resolve) => setTimeout(resolve, 60000));
+        else await new Promise((resolve) => setTimeout(resolve, 1500));
+      } catch (error) {
+        alert(error instanceof Error ? error.message : 'Cin7 refresh failed. Please check logs.');
         setSyncing(false);
         return;
       }
-
-      if (data.status === 'COMPLETED') {
-        alert(`Cin7 refresh complete. ${jobSummary(data)}`);
-        setSyncing(false);
-        window.location.reload();
-        return;
-      }
-
-      if (data.status === 'FAILED') {
-        alert(data.error || 'Cin7 refresh failed.');
-        setSyncing(false);
-        return;
-      }
-
-      if (data.status === 'PAUSED') await new Promise((resolve) => setTimeout(resolve, 60000));
-      else await new Promise((resolve) => setTimeout(resolve, 1200));
     }
 
-    alert('Cin7 refresh is still running. Please check activity/logs later.');
+    alert('Cin7 refresh is still running. Please check again later.');
     setSyncing(false);
   }
 
   async function refresh() {
     setSyncing(true);
-    const response = await fetch(`/api/admin/companies/${companyId}/cin7-sync/start`, { method: 'POST' });
-    const data = await response.json().catch(async () => ({ message: await response.text() }));
 
-    if (!response.ok) {
-      alert(data.message || 'Could not start Cin7 refresh.');
+    try {
+      const response = await fetchWithTimeout(`/api/admin/companies/${companyId}/cin7-sync/start`, { method: 'POST' }, 15000);
+      const data = await response.json().catch(async () => ({ message: await response.text() })) as Job | { message?: string };
+
+      if (!response.ok) {
+        alert('message' in data && data.message ? data.message : 'Could not start Cin7 refresh.');
+        setSyncing(false);
+        return;
+      }
+
+      await runJob((data as Job).id);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Could not start Cin7 refresh.');
       setSyncing(false);
-      return;
     }
-
-    await runJob(data.id);
   }
 
   if (!hasCin7) return <span className="text-xs text-slate-500">No Cin7 connection</span>;

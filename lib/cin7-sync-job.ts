@@ -3,9 +3,9 @@ import { decrypt } from '@/lib/crypto';
 import { logActivity, logSystem } from '@/lib/activity';
 import type { Session } from '@/lib/auth';
 
-const PAGE_LIMIT = 100;
-const MAX_PAGES_PER_RUN = 1;
+const PAGE_LIMIT = 50;
 const DEFAULT_BASE_URL = 'https://inventory.dearsystems.com/ExternalApi/v2';
+const CIN7_REQUEST_TIMEOUT_MS = 12000;
 
 function normalizeBaseUrl(baseUrl?: string | null) {
   return String(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, '');
@@ -34,12 +34,13 @@ function getModifiedDate(item: Record<string, any>) {
 async function cin7Get(connection: any, path: string, params: Record<string, string | number | undefined> = {}) {
   const baseUrl = normalizeBaseUrl(connection.baseUrl);
   const url = new URL(`${baseUrl}/${path.replace(/^\//, '')}`);
+
   Object.entries(params).forEach(([key, value]) => {
     if (value !== undefined && value !== '') url.searchParams.set(key, String(value));
   });
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 22000);
+  const timer = setTimeout(() => controller.abort(), CIN7_REQUEST_TIMEOUT_MS);
 
   try {
     const response = await fetch(url.toString(), {
@@ -53,48 +54,51 @@ async function cin7Get(connection: any, path: string, params: Record<string, str
     });
 
     const text = await response.text();
+
     if (response.status === 429) {
       const retryAfter = response.headers.get('retry-after') || '60';
-      const error: any = new Error(`Cin7 rate limit reached. Please wait ${retryAfter} seconds and try again.`);
+      const error: any = new Error(`Cin7 Core rate limit reached. Please wait ${retryAfter} seconds and try again.`);
       error.rateLimited = true;
-      error.retryAfter = Number(retryAfter) || 60;
       throw error;
     }
 
-    const data = text ? JSON.parse(text) : {};
-    if (!response.ok) throw new Error(`Cin7 API error ${response.status}: ${text.slice(0, 500)}`);
-    return data;
+    if (!response.ok) {
+      throw new Error(`Cin7 Core API error ${response.status}: ${text.slice(0, 500)}`);
+    }
+
+    return text ? JSON.parse(text) : {};
+  } catch (error: any) {
+    if (error?.name === 'AbortError') {
+      throw new Error('Cin7 Core API request took too long. The sync job was stopped safely. Please run refresh again or let the cron continue it.');
+    }
+    throw error;
   } finally {
     clearTimeout(timer);
   }
 }
 
-async function fetchPage(connection: any, endpoints: string[], page: number, since: Date | null) {
-  let lastError: any;
-  for (const endpoint of endpoints) {
-    try {
-      const params: Record<string, string | number | undefined> = { Page: page, Limit: PAGE_LIMIT };
-      if (since) params.LastModifiedOn = since.toISOString();
-      const data = await cin7Get(connection, endpoint, params);
-      return listFromResponse(data);
-    } catch (error) {
-      lastError = error;
-    }
-  }
-  throw lastError;
+async function fetchPage(connection: any, endpoint: string, page: number, since: Date | null) {
+  const params: Record<string, string | number | undefined> = { Page: page, Limit: PAGE_LIMIT };
+  if (since) params.LastModifiedOn = since.toISOString();
+  const data = await cin7Get(connection, endpoint, params);
+  return listFromResponse(data);
 }
 
 async function syncProductPage(companyId: string, connection: any, page: number, since: Date | null) {
-  const rows = await fetchPage(connection, ['Products', 'Product', 'ProductList'], page, since);
-  let created = 0, updated = 0, skipped = 0;
+  const rows = await fetchPage(connection, 'Product', page, since);
+  let created = 0;
+  let updated = 0;
+  let skipped = 0;
 
   for (const product of rows) {
     const cin7Id = getId(product);
     if (!cin7Id) { skipped += 1; continue; }
+
     const modified = getModifiedDate(product);
     if (since && modified && modified <= since) { skipped += 1; continue; }
 
     const existing = await prisma.product.findUnique({ where: { companyId_cin7Id: { companyId, cin7Id } } });
+
     await prisma.product.upsert({
       where: { companyId_cin7Id: { companyId, cin7Id } },
       update: {
@@ -114,25 +118,31 @@ async function syncProductPage(companyId: string, connection: any, page: number,
         status: product.Status || null
       }
     });
-    if (existing) updated += 1; else created += 1;
+
+    if (existing) updated += 1;
+    else created += 1;
   }
 
   return { fetched: rows.length, created, updated, skipped, done: rows.length < PAGE_LIMIT };
 }
 
 async function syncCustomerPage(companyId: string, connection: any, page: number, since: Date | null) {
-  const rows = await fetchPage(connection, ['Customers', 'Customer', 'CustomerList'], page, since);
-  let created = 0, updated = 0, skipped = 0;
+  const rows = await fetchPage(connection, 'Customer', page, since);
+  let created = 0;
+  let updated = 0;
+  let skipped = 0;
 
   for (const customer of rows) {
     const cin7Id = getId(customer);
     if (!cin7Id) { skipped += 1; continue; }
+
     const modified = getModifiedDate(customer);
     if (since && modified && modified <= since) { skipped += 1; continue; }
 
     const contacts = Array.isArray(customer.Contacts) ? customer.Contacts : [];
     const firstContact = contacts[0] || {};
     const existing = await prisma.customer.findUnique({ where: { companyId_cin7Id: { companyId, cin7Id } } });
+
     await prisma.customer.upsert({
       where: { companyId_cin7Id: { companyId, cin7Id } },
       update: {
@@ -148,7 +158,9 @@ async function syncCustomerPage(companyId: string, connection: any, page: number
         phone: customer.Phone || firstContact.Phone || firstContact.MobilePhone || null
       }
     });
-    if (existing) updated += 1; else created += 1;
+
+    if (existing) updated += 1;
+    else created += 1;
   }
 
   return { fetched: rows.length, created, updated, skipped, done: rows.length < PAGE_LIMIT };
@@ -156,7 +168,7 @@ async function syncCustomerPage(companyId: string, connection: any, page: number
 
 export async function createCin7SyncJob(companyId: string, mode: string, session?: Session | null) {
   const connection = await prisma.cin7Connection.findUnique({ where: { companyId } });
-  if (!connection) throw new Error('Cin7 connection is not configured for this client.');
+  if (!connection) throw new Error('Cin7 Core connection is not configured for this client.');
 
   const existing = await prisma.cin7SyncJob.findFirst({
     where: { companyId, status: { in: ['PENDING', 'RUNNING', 'PAUSED'] } },
@@ -166,9 +178,17 @@ export async function createCin7SyncJob(companyId: string, mode: string, session
   if (existing) return existing;
 
   const job = await prisma.cin7SyncJob.create({
-    data: { companyId, mode, message: 'Sync queued. Products and customers will refresh in small batches.' }
+    data: {
+      companyId,
+      mode,
+      status: 'PENDING',
+      phase: 'products',
+      page: 1,
+      message: 'Sync queued. Products and customers will refresh in short batches.'
+    }
   });
-  await logActivity({ session, companyId, action: 'CIN7_SYNC_QUEUED', entityType: 'Cin7SyncJob', entityId: job.id, message: 'Cin7 product/customer sync queued.' });
+
+  await logActivity({ session, companyId, action: 'CIN7_SYNC_QUEUED', entityType: 'Cin7SyncJob', entityId: job.id, message: 'Cin7 Core product/customer sync queued.' });
   return job;
 }
 
@@ -178,59 +198,63 @@ export async function runCin7SyncJob(jobId: string, session?: Session | null) {
   if (job.status === 'COMPLETED' || job.status === 'FAILED') return job;
 
   const connection = await prisma.cin7Connection.findUnique({ where: { companyId: job.companyId } });
-  if (!connection) throw new Error('Cin7 connection is not configured for this client.');
+  if (!connection) throw new Error('Cin7 Core connection is not configured for this client.');
 
   const state = await prisma.integrationSyncState.findUnique({ where: { companyId: job.companyId } }).catch(() => null);
   const productSince = state?.productsLastSyncedAt || null;
   const customerSince = state?.customersLastSyncedAt || null;
-  const startedAt = new Date();
+  const now = new Date();
 
   job = await prisma.cin7SyncJob.update({
     where: { id: job.id },
-    data: { status: 'RUNNING', startedAt: job.startedAt || startedAt, error: null, message: `Syncing ${job.phase}, page ${job.page}...` }
+    data: {
+      status: 'RUNNING',
+      startedAt: job.startedAt || now,
+      error: null,
+      message: `Syncing ${job.phase}, page ${job.page}...`
+    }
   });
 
   try {
-    for (let i = 0; i < MAX_PAGES_PER_RUN; i += 1) {
-      if (job.phase === 'products') {
-        const result = await syncProductPage(job.companyId, connection, job.page, productSince);
-        job = await prisma.cin7SyncJob.update({
-          where: { id: job.id },
-          data: {
-            productsFetched: { increment: result.fetched },
-            productsCreated: { increment: result.created },
-            productsUpdated: { increment: result.updated },
-            productsSkipped: { increment: result.skipped },
-            phase: result.done ? 'customers' : 'products',
-            page: result.done ? 1 : job.page + 1,
-            message: result.done ? 'Products finished. Starting customers...' : `Products page ${job.page} processed.`
-          }
-        });
-      } else {
-        const result = await syncCustomerPage(job.companyId, connection, job.page, customerSince);
-        const completed = result.done;
-        job = await prisma.cin7SyncJob.update({
-          where: { id: job.id },
-          data: {
-            customersFetched: { increment: result.fetched },
-            customersCreated: { increment: result.created },
-            customersUpdated: { increment: result.updated },
-            customersSkipped: { increment: result.skipped },
-            page: completed ? job.page : job.page + 1,
-            status: completed ? 'COMPLETED' : 'RUNNING',
-            finishedAt: completed ? new Date() : null,
-            message: completed ? 'Cin7 product/customer refresh completed.' : `Customers page ${job.page} processed.`
-          }
-        });
-      }
+    if (job.phase === 'products') {
+      const result = await syncProductPage(job.companyId, connection, job.page, productSince);
+      job = await prisma.cin7SyncJob.update({
+        where: { id: job.id },
+        data: {
+          productsFetched: { increment: result.fetched },
+          productsCreated: { increment: result.created },
+          productsUpdated: { increment: result.updated },
+          productsSkipped: { increment: result.skipped },
+          phase: result.done ? 'customers' : 'products',
+          page: result.done ? 1 : job.page + 1,
+          status: 'RUNNING',
+          message: result.done ? 'Products finished. Starting customers...' : `Products page ${job.page} processed.`
+        }
+      });
+    } else {
+      const result = await syncCustomerPage(job.companyId, connection, job.page, customerSince);
+      const completed = result.done;
+      job = await prisma.cin7SyncJob.update({
+        where: { id: job.id },
+        data: {
+          customersFetched: { increment: result.fetched },
+          customersCreated: { increment: result.created },
+          customersUpdated: { increment: result.updated },
+          customersSkipped: { increment: result.skipped },
+          page: completed ? job.page : job.page + 1,
+          status: completed ? 'COMPLETED' : 'RUNNING',
+          finishedAt: completed ? new Date() : null,
+          message: completed ? 'Cin7 Core product/customer refresh completed.' : `Customers page ${job.page} processed.`
+        }
+      });
     }
 
     if (job.status === 'COMPLETED') {
       const message = `Products: ${job.productsCreated} created, ${job.productsUpdated} updated, ${job.productsSkipped} skipped. Customers: ${job.customersCreated} created, ${job.customersUpdated} updated, ${job.customersSkipped} skipped.`;
       await prisma.integrationSyncState.upsert({
         where: { companyId: job.companyId },
-        update: { productsLastSyncedAt: startedAt, customersLastSyncedAt: startedAt, lastSyncStatus: 'SUCCESS', lastSyncMessage: message },
-        create: { companyId: job.companyId, productsLastSyncedAt: startedAt, customersLastSyncedAt: startedAt, lastSyncStatus: 'SUCCESS', lastSyncMessage: message }
+        update: { productsLastSyncedAt: new Date(), customersLastSyncedAt: new Date(), lastSyncStatus: 'SUCCESS', lastSyncMessage: message },
+        create: { companyId: job.companyId, productsLastSyncedAt: new Date(), customersLastSyncedAt: new Date(), lastSyncStatus: 'SUCCESS', lastSyncMessage: message }
       });
       await logActivity({ session, companyId: job.companyId, action: 'CIN7_SYNC_COMPLETED', entityType: 'Cin7SyncJob', entityId: job.id, message });
     }
@@ -238,7 +262,7 @@ export async function runCin7SyncJob(jobId: string, session?: Session | null) {
     return job;
   } catch (error: any) {
     const isRateLimit = Boolean(error?.rateLimited);
-    const message = error instanceof Error ? error.message : 'Unknown Cin7 sync error';
+    const message = error instanceof Error ? error.message : 'Unknown Cin7 Core sync error';
     const status = isRateLimit ? 'PAUSED' : 'FAILED';
 
     const failedJob = await prisma.cin7SyncJob.update({ where: { id: job.id }, data: { status, error: message, message } });
