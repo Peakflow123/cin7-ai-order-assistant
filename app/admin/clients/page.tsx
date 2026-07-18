@@ -24,7 +24,7 @@ export default async function AdminClientsPage() {
       <div className="admin-shell">
         <AdminNav active="/admin/clients" />
         <section className="space-y-6 min-w-0">
-          <section className="hero-card"><h1 className="page-title">Clients & Controls</h1><p className="page-subtitle">Client lifecycle, limits, automation controls and admin-triggered Cin7 refresh.</p></section>
+          <section className="hero-card"><h1 className="page-title">Clients & Controls</h1><p className="page-subtitle">Client lifecycle, limits, automation controls and admin-triggered Cin7 Core refresh.</p></section>
           <section className="space-y-4">
             {companies.map((company) => {
               const usage = usageByCompany.get(company.id);

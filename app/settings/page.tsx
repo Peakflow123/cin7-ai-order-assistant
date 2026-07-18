@@ -24,7 +24,7 @@ export default async function SettingsPage() {
       <section className="hero-card">
         <Link href="/dashboard" className="text-sm font-bold text-blue-700">← Back to Dashboard</Link>
         <h1 className="page-title mt-2">Settings</h1>
-        <p className="page-subtitle">Manage session security and Cin7 connection.</p>
+        <p className="page-subtitle">Manage session security and Cin7 Core connection.</p>
       </section>
 
       <SessionTimeoutClient current={user.sessionTimeoutMinutes} />
