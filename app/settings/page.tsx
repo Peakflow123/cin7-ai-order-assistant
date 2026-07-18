@@ -8,7 +8,11 @@ import Cin7ConnectionSection from './Cin7ConnectionSection';
 
 function safeDecrypt(value?: string | null) {
   if (!value) return '';
-  try { return decrypt(value); } catch { return ''; }
+  try {
+    return decrypt(value);
+  } catch {
+    return '';
+  }
 }
 
 export default async function SettingsPage() {

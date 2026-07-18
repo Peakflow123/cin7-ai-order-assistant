@@ -2,25 +2,16 @@ import { prisma } from '@/lib/db';
 import { decrypt } from '@/lib/crypto';
 
 const DEFAULT_BASE_URL = 'https://inventory.dearsystems.com/ExternalApi/v2';
-const PAGE_LIMIT = 250;
+const PAGE_LIMIT = 100;
+const MAX_FRONTEND_PAGES = 200;
 
 type Entity = 'Product' | 'Customer';
 
-function normalizeBaseUrl(baseUrl?: string | null) {
+function cleanBaseUrl(baseUrl?: string | null) {
   return String(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, '');
 }
 
-function getId(item: Record<string, any>) {
-  return String(item.ID || item.Id || item.id || item.ProductID || item.CustomerID || item.ProductId || item.CustomerId || '').trim();
-}
-
-function getModifiedDate(item: Record<string, any>) {
-  const raw = item.LastModifiedOn || item.LastModified || item.UpdatedOn || item.ModifiedOn || item.LastUpdated;
-  const date = raw ? new Date(raw) : null;
-  return date && !Number.isNaN(date.getTime()) ? date : null;
-}
-
-function listFromResponse(data: any, entity: Entity) {
+function listFromCin7Response(data: any, entity: Entity): any[] {
   if (Array.isArray(data)) return data;
 
   if (entity === 'Product') {
@@ -40,59 +31,106 @@ function listFromResponse(data: any, entity: Entity) {
   return [];
 }
 
-async function cin7Get(connection: any, entity: Entity, page: number, since?: string | null) {
-  const url = new URL(`${normalizeBaseUrl(connection.baseUrl)}/${entity}`);
+function getCin7Id(item: Record<string, any>) {
+  return String(
+    item.ID ||
+      item.Id ||
+      item.id ||
+      item.ProductID ||
+      item.ProductId ||
+      item.CustomerID ||
+      item.CustomerId ||
+      ''
+  ).trim();
+}
+
+function getModifiedDate(item: Record<string, any>) {
+  const raw = item.LastModifiedOn || item.LastModified || item.UpdatedOn || item.ModifiedOn || item.LastUpdated;
+  const date = raw ? new Date(raw) : null;
+  return date && !Number.isNaN(date.getTime()) ? date : null;
+}
+
+function shouldSkipBecauseNotModified(item: Record<string, any>, since?: string | null) {
+  if (!since) return false;
+  const modified = getModifiedDate(item);
+  if (!modified) return false;
+  return modified <= new Date(since);
+}
+
+async function getCin7Page(connection: any, entity: Entity, page: number, since?: string | null) {
+  const url = new URL(`${cleanBaseUrl(connection.baseUrl)}/${entity}`);
   url.searchParams.set('Page', String(page));
   url.searchParams.set('Limit', String(PAGE_LIMIT));
 
-  // Simple incremental attempt. If Cin7 Core ignores this, upsert still prevents duplicates.
+  // If Cin7 Core accepts this filter, it will return less data. If not, local upsert still prevents duplicates.
   if (since) url.searchParams.set('LastModifiedOn', since);
 
   const response = await fetch(url.toString(), {
     headers: {
+      'Content-Type': 'application/json',
       'api-auth-accountid': connection.accountId,
-      'api-auth-applicationkey': decrypt(connection.apiKeyEncrypted),
-      'Content-Type': 'application/json'
+      'api-auth-applicationkey': decrypt(connection.apiKeyEncrypted)
     },
     cache: 'no-store'
   });
 
   const text = await response.text();
-  if (!response.ok) throw new Error(`Cin7 Core ${entity} API error ${response.status}: ${text.slice(0, 500)}`);
+
+  if (!response.ok) {
+    throw new Error(`Cin7 Core ${entity} request failed ${response.status}: ${text.slice(0, 500)}`);
+  }
+
   return text ? JSON.parse(text) : {};
 }
 
-async function syncProductRows(companyId: string, rows: any[], since?: string | null) {
+async function saveProductRows(companyId: string, rows: any[], since?: string | null) {
   let created = 0;
   let updated = 0;
   let skipped = 0;
 
-  for (const product of rows) {
-    const cin7Id = getId(product);
-    if (!cin7Id) { skipped += 1; continue; }
+  for (const item of rows) {
+    const cin7Id = getCin7Id(item);
+    if (!cin7Id) {
+      skipped += 1;
+      continue;
+    }
 
-    const modified = getModifiedDate(product);
-    if (since && modified && modified <= new Date(since)) { skipped += 1; continue; }
+    if (shouldSkipBecauseNotModified(item, since)) {
+      skipped += 1;
+      continue;
+    }
 
-    const existing = await prisma.product.findUnique({ where: { companyId_cin7Id: { companyId, cin7Id } } });
+    const existing = await prisma.product.findUnique({
+      where: {
+        companyId_cin7Id: {
+          companyId,
+          cin7Id
+        }
+      }
+    });
 
     await prisma.product.upsert({
-      where: { companyId_cin7Id: { companyId, cin7Id } },
+      where: {
+        companyId_cin7Id: {
+          companyId,
+          cin7Id
+        }
+      },
       update: {
-        sku: product.SKU || product.Sku || product.Code || null,
-        name: product.Name || product.ProductName || product.SKU || 'Unnamed Product',
-        barcode: product.Barcode || product.BarCode || null,
-        uom: product.UnitOfMeasure || product.UOM || product.Uom || null,
-        status: product.Status || null
+        sku: item.SKU || item.Sku || item.Code || null,
+        name: item.Name || item.ProductName || item.SKU || item.Code || 'Unnamed Product',
+        barcode: item.Barcode || item.BarCode || null,
+        uom: item.UnitOfMeasure || item.UOM || item.Uom || null,
+        status: item.Status || null
       },
       create: {
         companyId,
         cin7Id,
-        sku: product.SKU || product.Sku || product.Code || null,
-        name: product.Name || product.ProductName || product.SKU || 'Unnamed Product',
-        barcode: product.Barcode || product.BarCode || null,
-        uom: product.UnitOfMeasure || product.UOM || product.Uom || null,
-        status: product.Status || null
+        sku: item.SKU || item.Sku || item.Code || null,
+        name: item.Name || item.ProductName || item.SKU || item.Code || 'Unnamed Product',
+        barcode: item.Barcode || item.BarCode || null,
+        uom: item.UnitOfMeasure || item.UOM || item.Uom || null,
+        status: item.Status || null
       }
     });
 
@@ -103,35 +141,53 @@ async function syncProductRows(companyId: string, rows: any[], since?: string | 
   return { created, updated, skipped };
 }
 
-async function syncCustomerRows(companyId: string, rows: any[], since?: string | null) {
+async function saveCustomerRows(companyId: string, rows: any[], since?: string | null) {
   let created = 0;
   let updated = 0;
   let skipped = 0;
 
-  for (const customer of rows) {
-    const cin7Id = getId(customer);
-    if (!cin7Id) { skipped += 1; continue; }
+  for (const item of rows) {
+    const cin7Id = getCin7Id(item);
+    if (!cin7Id) {
+      skipped += 1;
+      continue;
+    }
 
-    const modified = getModifiedDate(customer);
-    if (since && modified && modified <= new Date(since)) { skipped += 1; continue; }
+    if (shouldSkipBecauseNotModified(item, since)) {
+      skipped += 1;
+      continue;
+    }
 
-    const contacts = Array.isArray(customer.Contacts) ? customer.Contacts : [];
+    const contacts = Array.isArray(item.Contacts) ? item.Contacts : [];
     const firstContact = contacts[0] || {};
-    const existing = await prisma.customer.findUnique({ where: { companyId_cin7Id: { companyId, cin7Id } } });
+
+    const existing = await prisma.customer.findUnique({
+      where: {
+        companyId_cin7Id: {
+          companyId,
+          cin7Id
+        }
+      }
+    });
 
     await prisma.customer.upsert({
-      where: { companyId_cin7Id: { companyId, cin7Id } },
+      where: {
+        companyId_cin7Id: {
+          companyId,
+          cin7Id
+        }
+      },
       update: {
-        name: customer.Name || customer.CustomerName || 'Unnamed Customer',
-        email: customer.Email || firstContact.Email || null,
-        phone: customer.Phone || firstContact.Phone || firstContact.MobilePhone || null
+        name: item.Name || item.CustomerName || 'Unnamed Customer',
+        email: item.Email || firstContact.Email || null,
+        phone: item.Phone || firstContact.Phone || firstContact.MobilePhone || null
       },
       create: {
         companyId,
         cin7Id,
-        name: customer.Name || customer.CustomerName || 'Unnamed Customer',
-        email: customer.Email || firstContact.Email || null,
-        phone: customer.Phone || firstContact.Phone || firstContact.MobilePhone || null
+        name: item.Name || item.CustomerName || 'Unnamed Customer',
+        email: item.Email || firstContact.Email || null,
+        phone: item.Phone || firstContact.Phone || firstContact.MobilePhone || null
       }
     });
 
@@ -142,31 +198,53 @@ async function syncCustomerRows(companyId: string, rows: any[], since?: string |
   return { created, updated, skipped };
 }
 
-export async function syncCin7OnePage(companyId: string, entity: Entity, page: number, since?: string | null) {
-  const connection = await prisma.cin7Connection.findUnique({ where: { companyId } });
-  if (!connection) throw new Error('Cin7 Core connection is not configured for this client.');
+export async function syncCin7Page(params: {
+  companyId: string;
+  entity: Entity;
+  page: number;
+  since?: string | null;
+}) {
+  if (params.page < 1 || params.page > MAX_FRONTEND_PAGES) {
+    throw new Error('Invalid Cin7 page number.');
+  }
 
-  const data = await cin7Get(connection, entity, page, since || null);
-  const rows = listFromResponse(data, entity);
-  const result = entity === 'Product'
-    ? await syncProductRows(companyId, rows, since || null)
-    : await syncCustomerRows(companyId, rows, since || null);
+  const connection = await prisma.cin7Connection.findUnique({
+    where: {
+      companyId: params.companyId
+    }
+  });
+
+  if (!connection) {
+    throw new Error('Cin7 Core connection is not configured.');
+  }
+
+  const raw = await getCin7Page(connection, params.entity, params.page, params.since || null);
+  const rows = listFromCin7Response(raw, params.entity);
+
+  const result =
+    params.entity === 'Product'
+      ? await saveProductRows(params.companyId, rows, params.since || null)
+      : await saveCustomerRows(params.companyId, rows, params.since || null);
 
   return {
-    entity,
-    page,
+    entity: params.entity,
+    page: params.page,
     fetched: rows.length,
     done: rows.length < PAGE_LIMIT,
-    ...result
+    created: result.created,
+    updated: result.updated,
+    skipped: result.skipped
   };
 }
 
-export async function completeCin7ManualSync(companyId: string, summary: any) {
+export async function completeCin7Refresh(companyId: string, summary: any) {
   const now = new Date();
   const message = `Products: ${summary.productsCreated || 0} created, ${summary.productsUpdated || 0} updated, ${summary.productsSkipped || 0} skipped. Customers: ${summary.customersCreated || 0} created, ${summary.customersUpdated || 0} updated, ${summary.customersSkipped || 0} skipped.`;
 
   await prisma.integrationSyncState.upsert({
-    where: { companyId },
+    where: {
+      companyId
+    },
     update: {
       productsLastSyncedAt: now,
       customersLastSyncedAt: now,
@@ -182,5 +260,9 @@ export async function completeCin7ManualSync(companyId: string, summary: any) {
     }
   });
 
-  return { ok: true, message, syncedAt: now.toISOString() };
+  return {
+    ok: true,
+    message,
+    syncedAt: now.toISOString()
+  };
 }

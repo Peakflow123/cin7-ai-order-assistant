@@ -4,13 +4,16 @@ import { useEffect } from 'react';
 
 export default function PWARegister() {
   useEffect(() => {
-    if (typeof window === 'undefined') return;
     if (!('serviceWorker' in navigator)) return;
 
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('/sw.js').catch((error) => {
-        console.warn('NexOrder AI service worker registration failed:', error);
-      });
+    window.addEventListener('load', async () => {
+      try {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(registrations.map((registration) => registration.update()));
+        await navigator.serviceWorker.register('/sw.js');
+      } catch {
+        // Ignore service worker update errors. App should continue normally.
+      }
     });
   }, []);
 

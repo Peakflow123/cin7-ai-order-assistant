@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
 
-export default function Cin7SettingsRedirect() {
+export default function Cin7RedirectPage() {
   redirect('/settings');
 }

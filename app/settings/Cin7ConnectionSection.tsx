@@ -21,9 +21,15 @@ type Totals = {
   customersSkipped: number;
 };
 
-function warningFromError(error: unknown) {
-  if (error instanceof Error) return error.message;
-  return 'Cin7 Core refresh failed.';
+function newTotals(): Totals {
+  return {
+    productsCreated: 0,
+    productsUpdated: 0,
+    productsSkipped: 0,
+    customersCreated: 0,
+    customersUpdated: 0,
+    customersSkipped: 0
+  };
 }
 
 export default function Cin7ConnectionSection({
@@ -40,6 +46,7 @@ export default function Cin7ConnectionSection({
   const [message, setMessage] = useState('');
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [progress, setProgress] = useState('');
 
   async function save() {
     setSaving(true);
@@ -73,14 +80,14 @@ export default function Cin7ConnectionSection({
     }
 
     if (!response.ok) {
-      throw new Error(data.message || 'Cin7 Core refresh failed.');
+      throw new Error(data.message || 'Cin7 Core request failed.');
     }
 
     return data;
   }
 
   async function refreshEntity(entity: 'Product' | 'Customer', since: string | null, totals: Totals) {
-    for (let page = 1; page <= 100; page += 1) {
+    for (let page = 1; page <= 200; page += 1) {
       setMessage(`Refreshing ${entity === 'Product' ? 'products' : 'customers'} page ${page}...`);
 
       const data = await postJson('/api/settings/cin7/refresh-step', {
@@ -99,7 +106,9 @@ export default function Cin7ConnectionSection({
         totals.customersSkipped += data.skipped || 0;
       }
 
-      setMessage(`${entity} page ${page} processed. ${data.created || 0} created, ${data.updated || 0} updated, ${data.skipped || 0} skipped.`);
+      setProgress(
+        `Latest: ${entity} page ${page}. Fetched ${data.fetched || 0}. Created ${data.created || 0}. Updated ${data.updated || 0}. Skipped ${data.skipped || 0}.`
+      );
 
       if (data.done) break;
     }
@@ -107,15 +116,10 @@ export default function Cin7ConnectionSection({
 
   async function refresh() {
     setSyncing(true);
+    setProgress('');
+    setMessage('Starting Cin7 Core refresh...');
 
-    const totals: Totals = {
-      productsCreated: 0,
-      productsUpdated: 0,
-      productsSkipped: 0,
-      customersCreated: 0,
-      customersUpdated: 0,
-      customersSkipped: 0
-    };
+    const totals = newTotals();
 
     try {
       await refreshEntity('Product', lastProductsSync ?? null, totals);
@@ -124,7 +128,7 @@ export default function Cin7ConnectionSection({
       const complete = await postJson('/api/settings/cin7/refresh-complete', totals);
       setMessage(complete.message || 'Cin7 Core refresh completed.');
     } catch (error) {
-      setMessage(warningFromError(error));
+      setMessage(error instanceof Error ? error.message : 'Cin7 Core refresh failed.');
     } finally {
       setSyncing(false);
     }
@@ -191,11 +195,8 @@ export default function Cin7ConnectionSection({
         {syncing ? 'Refreshing...' : 'Refresh Products & Customers'}
       </button>
 
-      {message && (
-        <p className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-semibold text-slate-700">
-          {message}
-        </p>
-      )}
+      {progress && <p className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-sm font-semibold text-blue-800">{progress}</p>}
+      {message && <p className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-semibold text-slate-700">{message}</p>}
     </section>
   );
 }
