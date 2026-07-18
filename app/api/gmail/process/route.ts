@@ -14,7 +14,7 @@ export async function POST(request: Request) {
     if (!connectionId || !messageId) return new NextResponse('connectionId and messageId are required', { status: 400 });
 
     const gmailMessage = await getGmailMessageText(connectionId, session.companyId, messageId);
-    const sourceMessageId = `gmail:${connectionId}:${gmailMessage.messageId}`;
+    const sourceMessageId = `gmail:${connectionId}:${gmailMessage.threadId || gmailMessage.messageId}`;
 
     const result = await processEmailIntoOrder({
       companyId: session.companyId,

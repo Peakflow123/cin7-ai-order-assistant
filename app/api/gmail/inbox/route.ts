@@ -2,20 +2,23 @@ import { NextResponse } from 'next/server';
 import { requireSession } from '@/lib/auth';
 import { listRecentGmailMessages } from '@/lib/gmail';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: Request) {
   try {
     const session = requireSession();
-    const url = new URL(request.url);
-    const connectionId = url.searchParams.get('connectionId');
-    const maxResults = Number(url.searchParams.get('maxResults') || 5);
-    const includeNonOrders = url.searchParams.get('includeNonOrders') === 'true';
+    const { searchParams } = new URL(request.url);
+    const connectionId = searchParams.get('connectionId') || '';
+    const maxResults = Math.min(Math.max(Number(searchParams.get('maxResults') || 50), 1), 100);
+    const includeNonOrders = searchParams.get('includeNonOrders') === 'true';
+    const fromDate = searchParams.get('fromDate') || undefined;
+    const toDate = searchParams.get('toDate') || undefined;
 
-    if (!connectionId) return new NextResponse('connectionId is required', { status: 400 });
+    if (!connectionId) return NextResponse.json({ message: 'connectionId is required' }, { status: 400 });
 
-    const messages = await listRecentGmailMessages(connectionId, session.companyId, Math.min(8, Math.max(1, maxResults)), !includeNonOrders);
+    const messages = await listRecentGmailMessages(connectionId, session.companyId, maxResults, !includeNonOrders, { fromDate, toDate });
     return NextResponse.json({ messages });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown Gmail inbox error';
-    return NextResponse.json({ message }, { status: 500 });
+    return NextResponse.json({ message: error instanceof Error ? error.message : 'Could not load Gmail inbox.' }, { status: 500 });
   }
 }

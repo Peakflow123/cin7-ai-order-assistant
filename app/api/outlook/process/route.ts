@@ -13,7 +13,7 @@ export async function POST(request: Request) {
     if (!connectionId || !messageId) return new NextResponse('connectionId and messageId are required', { status: 400 });
 
     const outlookMessage = await getOutlookMessageText(connectionId, session.companyId, messageId);
-    const sourceMessageId = `outlook:${connectionId}:${outlookMessage.messageId}`;
+    const sourceMessageId = `outlook:${connectionId}:${outlookMessage.conversationId || outlookMessage.messageId}`;
 
     const result = await processEmailIntoOrder({
       companyId: session.companyId,

@@ -2,18 +2,23 @@ import { NextResponse } from 'next/server';
 import { requireSession } from '@/lib/auth';
 import { listRecentOutlookMessages } from '@/lib/outlook';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: Request) {
   try {
     const session = requireSession();
-    const url = new URL(request.url);
-    const connectionId = url.searchParams.get('connectionId');
-    const maxResults = Number(url.searchParams.get('maxResults') || 5);
-    const includeNonOrders = url.searchParams.get('includeNonOrders') === 'true';
-    if (!connectionId) return new NextResponse('connectionId is required', { status: 400 });
+    const { searchParams } = new URL(request.url);
+    const connectionId = searchParams.get('connectionId') || '';
+    const maxResults = Math.min(Math.max(Number(searchParams.get('maxResults') || 50), 1), 100);
+    const includeNonOrders = searchParams.get('includeNonOrders') === 'true';
+    const fromDate = searchParams.get('fromDate') || undefined;
+    const toDate = searchParams.get('toDate') || undefined;
 
-    const messages = await listRecentOutlookMessages(connectionId, session.companyId, Math.min(8, Math.max(1, maxResults)), !includeNonOrders);
+    if (!connectionId) return NextResponse.json({ message: 'connectionId is required' }, { status: 400 });
+
+    const messages = await listRecentOutlookMessages(connectionId, session.companyId, maxResults, !includeNonOrders, { fromDate, toDate });
     return NextResponse.json({ messages });
   } catch (error) {
-    return NextResponse.json({ message: error instanceof Error ? error.message : 'Unknown Outlook inbox error' }, { status: 500 });
+    return NextResponse.json({ message: error instanceof Error ? error.message : 'Could not load Outlook inbox.' }, { status: 500 });
   }
 }

@@ -132,9 +132,17 @@ export async function getGmailMessageText(connectionId: string, companyId: strin
   return { connection, messageId: message.id || messageId, threadId: message.threadId || '', from, subject, date, bodyText: fullText, attachmentNames: collected.attachments.map((item) => item.filename) };
 }
 
-export async function listRecentGmailMessages(connectionId: string, companyId: string, maxResults = 5, onlyOrderRelated = true) {
+function gmailQuery(options?: { fromDate?: string; toDate?: string }) {
+  const parts = ['-in:spam', '-in:trash'];
+  if (options?.fromDate) parts.push(`after:${options.fromDate.replaceAll('-', '/')}`);
+  if (options?.toDate) parts.push(`before:${options.toDate.replaceAll('-', '/')}`);
+  if (!options?.fromDate && !options?.toDate) parts.push('newer_than:14d');
+  return parts.join(' ');
+}
+
+export async function listRecentGmailMessages(connectionId: string, companyId: string, maxResults = 5, onlyOrderRelated = true, options?: { fromDate?: string; toDate?: string }) {
   const { gmail } = await getGmailClient(connectionId, companyId);
-  const listResponse = await gmail.users.messages.list({ userId: 'me', maxResults, q: 'newer_than:14d -in:spam -in:trash' });
+  const listResponse = await gmail.users.messages.list({ userId: 'me', maxResults, q: gmailQuery(options) });
   const messages = listResponse.data.messages || [];
   const summaries: GmailMessageSummary[] = [];
   for (const item of messages) {
@@ -146,7 +154,7 @@ export async function listRecentGmailMessages(connectionId: string, companyId: s
     const subject = getHeader(headers, 'Subject') || '(No subject)';
     const date = getHeader(headers, 'Date');
     const attachmentNames = collectMetadataAttachmentNames(message.payload);
-    const sourceMessageId = `gmail:${connectionId}:${message.id}`;
+    const sourceMessageId = `gmail:${connectionId}:${message.threadId || message.id}`;
     const existingOrder = await prisma.order.findFirst({ where: { companyId, sourceMessageId }, select: { id: true } });
     const classification = await classifyEmailForOrder({ companyId, subject, from, snippet: message.snippet || '', attachmentNames });
     if (onlyOrderRelated && classification.category === 'NOT_ORDER' && classification.confidence >= 0.7) continue;

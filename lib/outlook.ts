@@ -5,6 +5,7 @@ import { parseAttachmentBuffer } from '@/lib/attachment-text';
 
 export type OutlookMessageSummary = {
   id: string;
+  conversationId?: string;
   from: string;
   subject: string;
   date: string;
@@ -91,7 +92,7 @@ export async function getOutlookAccessToken(connectionId: string, companyId: str
 export async function getOutlookMessageText(connectionId: string, companyId: string, messageId: string) {
   const { accessToken, connection } = await getOutlookAccessToken(connectionId, companyId);
 
-  const message = await graphFetch(accessToken, `/me/messages/${encodeURIComponent(messageId)}?$select=id,subject,from,receivedDateTime,body,bodyPreview,hasAttachments`);
+  const message = await graphFetch(accessToken, `/me/messages/${encodeURIComponent(messageId)}?$select=id,conversationId,subject,from,receivedDateTime,body,bodyPreview,hasAttachments`);
   const from = message.from?.emailAddress?.address || message.from?.emailAddress?.name || '';
   const bodyText = message.body?.contentType === 'html' ? stripHtml(message.body?.content || '') : (message.body?.content || message.bodyPreview || '');
   const attachmentTexts: string[] = [];
@@ -116,7 +117,8 @@ export async function getOutlookMessageText(connectionId: string, companyId: str
 
   return {
     connection,
-    messageId: message.id || messageId,
+    messageId: message.conversationId || message.id || messageId,
+    conversationId: message.conversationId || '',
     from,
     subject: message.subject || '(No subject)',
     date: message.receivedDateTime || '',
@@ -125,9 +127,17 @@ export async function getOutlookMessageText(connectionId: string, companyId: str
   };
 }
 
-export async function listRecentOutlookMessages(connectionId: string, companyId: string, maxResults = 5, onlyOrderRelated = true) {
+function outlookFilter(options?: { fromDate?: string; toDate?: string }) {
+  const filters: string[] = [];
+  if (options?.fromDate) filters.push(`receivedDateTime ge ${options.fromDate}T00:00:00Z`);
+  if (options?.toDate) filters.push(`receivedDateTime le ${options.toDate}T23:59:59Z`);
+  return filters.length ? `&$filter=${encodeURIComponent(filters.join(' and '))}` : '';
+}
+
+export async function listRecentOutlookMessages(connectionId: string, companyId: string, maxResults = 5, onlyOrderRelated = true, options?: { fromDate?: string; toDate?: string }) {
   const { accessToken } = await getOutlookAccessToken(connectionId, companyId);
-  const messages = await graphFetch(accessToken, `/me/messages?$top=${maxResults}&$orderby=receivedDateTime desc&$select=id,subject,from,receivedDateTime,bodyPreview,hasAttachments`);
+  const filter = outlookFilter(options);
+  const messages = await graphFetch(accessToken, `/me/messages?$top=${maxResults}&$orderby=receivedDateTime desc&$select=id,conversationId,subject,from,receivedDateTime,bodyPreview,hasAttachments${filter}`);
   const summaries: OutlookMessageSummary[] = [];
 
   for (const message of messages.value || []) {
@@ -143,7 +153,7 @@ export async function listRecentOutlookMessages(connectionId: string, companyId:
       }
     }
 
-    const sourceMessageId = `outlook:${connectionId}:${message.id}`;
+    const sourceMessageId = `outlook:${connectionId}:${message.conversationId || message.id}`;
     const existingOrder = await prisma.order.findFirst({ where: { companyId, sourceMessageId }, select: { id: true } });
     const classification = await classifyEmailForOrder({ companyId, subject: message.subject || '', from, snippet: message.bodyPreview || '', attachmentNames });
 
@@ -151,6 +161,7 @@ export async function listRecentOutlookMessages(connectionId: string, companyId:
 
     summaries.push({
       id: message.id,
+      conversationId: message.conversationId || '',
       from,
       subject: message.subject || '(No subject)',
       date: message.receivedDateTime || '',

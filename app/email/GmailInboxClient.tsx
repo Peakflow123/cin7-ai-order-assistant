@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
 type GmailConnection = { id: string; email: string | null; isActive: boolean };
 type GmailMessage = {
   id: string;
+  threadId?: string;
   from: string;
   subject: string;
   date: string;
@@ -22,6 +23,11 @@ function badgeClass(category: string) {
   return 'badge badge-yellow';
 }
 
+function parseMessageDate(value: string) {
+  const date = value ? new Date(value) : null;
+  return date && !Number.isNaN(date.getTime()) ? date : null;
+}
+
 export default function GmailInboxClient({ connections }: { connections: GmailConnection[] }) {
   const [selectedConnectionId, setSelectedConnectionId] = useState(connections[0]?.id || '');
   const [messages, setMessages] = useState<GmailMessage[]>([]);
@@ -29,13 +35,33 @@ export default function GmailInboxClient({ connections }: { connections: GmailCo
   const [loading, setLoading] = useState(false);
   const [includeNonOrders, setIncludeNonOrders] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const [maxResults, setMaxResults] = useState(50);
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
+
+  const filteredMessages = useMemo(() => {
+    return messages.filter((message) => {
+      const date = parseMessageDate(message.date);
+      if (fromDate && date && date < new Date(`${fromDate}T00:00:00`)) return false;
+      if (toDate && date && date > new Date(`${toDate}T23:59:59`)) return false;
+      return true;
+    });
+  }, [messages, fromDate, toDate]);
 
   async function loadInbox() {
     if (!selectedConnectionId) return;
     setLoading(true);
-    setStatus('Loading recent Gmail messages with lightweight AI classification...');
+    setStatus('Loading Gmail messages with lightweight AI classification...');
 
-    const response = await fetch(`/api/gmail/inbox?connectionId=${selectedConnectionId}&maxResults=5&includeNonOrders=${includeNonOrders}`);
+    const params = new URLSearchParams({
+      connectionId: selectedConnectionId,
+      maxResults: String(maxResults),
+      includeNonOrders: String(includeNonOrders)
+    });
+    if (fromDate) params.set('fromDate', fromDate);
+    if (toDate) params.set('toDate', toDate);
+
+    const response = await fetch(`/api/gmail/inbox?${params.toString()}`);
     const data = await response.json();
 
     if (!response.ok) {
@@ -45,7 +71,7 @@ export default function GmailInboxClient({ connections }: { connections: GmailCo
     }
 
     setMessages(data.messages || []);
-    setStatus(`Loaded ${(data.messages || []).length} Gmail messages. Full attachments are read only when you click Process Email.`);
+    setStatus(`Loaded ${(data.messages || []).length} Gmail messages. Attachments are read only when you click Process Email.`);
     setLoading(false);
   }
 
@@ -67,12 +93,19 @@ export default function GmailInboxClient({ connections }: { connections: GmailCo
       return;
     }
 
+    if (data.alreadyProcessed) {
+      setStatus(data.message || 'This Gmail message/conversation has already been processed.');
+      await loadInbox();
+      return;
+    }
+
     if (data.orderId) {
       window.location.href = `/orders/${data.orderId}`;
       return;
     }
 
     setStatus(data.message || 'Gmail message processed.');
+    await loadInbox();
   }
 
   if (connections.length === 0) return null;
@@ -82,25 +115,33 @@ export default function GmailInboxClient({ connections }: { connections: GmailCo
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h2 className="text-xl font-bold">Gmail Inbox Automation Test</h2>
-          <p className="text-sm text-slate-500">List view is now token-optimized. Attachments are parsed only when processing a selected email.</p>
+          <p className="text-sm text-slate-500">Load up to 100 Gmail messages, filter by date, and prevent duplicate processing.</p>
         </div>
         <div className="flex flex-col gap-2 md:flex-row">
           <select className="input md:w-80" value={selectedConnectionId} onChange={(event) => setSelectedConnectionId(event.target.value)}>
             {connections.map((connection) => <option key={connection.id} value={connection.id}>{connection.email || 'Connected Gmail mailbox'}</option>)}
           </select>
-          <button className="btn" disabled={loading || !selectedConnectionId} onClick={loadInbox}>{loading ? 'Loading...' : 'Load Gmail Orders'}</button>
+          <button className="btn" disabled={loading || !selectedConnectionId} onClick={loadInbox}>{loading ? 'Loading...' : 'Load Gmail Emails'}</button>
         </div>
       </div>
 
-      <label className="flex items-center gap-2 text-sm text-slate-600">
-        <input type="checkbox" checked={includeNonOrders} onChange={(event) => setIncludeNonOrders(event.target.checked)} />
-        Include emails AI thinks are not orders
-      </label>
+      <div className="grid gap-3 md:grid-cols-4">
+        <label className="text-sm font-bold text-slate-700">Load
+          <select className="input mt-1" value={maxResults} onChange={(event) => setMaxResults(Number(event.target.value))}>
+            <option value={25}>Last 25 emails</option>
+            <option value={50}>Last 50 emails</option>
+            <option value={100}>Last 100 emails</option>
+          </select>
+        </label>
+        <label className="text-sm font-bold text-slate-700">From date<input className="input mt-1" type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} /></label>
+        <label className="text-sm font-bold text-slate-700">To date<input className="input mt-1" type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} /></label>
+        <label className="mt-7 flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={includeNonOrders} onChange={(event) => setIncludeNonOrders(event.target.checked)} /> Include emails AI thinks are not orders</label>
+      </div>
 
       {status && <p className="rounded-2xl bg-slate-50 p-3 text-sm text-slate-700">{status}</p>}
 
       <div className="space-y-3">
-        {messages.map((message) => (
+        {filteredMessages.map((message) => (
           <div key={message.id} className="rounded-2xl border border-slate-200 bg-white p-4">
             <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
               <div className="min-w-0">

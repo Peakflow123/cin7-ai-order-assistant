@@ -16,20 +16,12 @@ export async function GET(request: Request) {
       companyId: session.companyId,
       OR: [
         { name: { contains: q, mode: 'insensitive' } },
-        { sku: { contains: q, mode: 'insensitive' } },
-        { barcode: { contains: q, mode: 'insensitive' } }
+        { sku: { contains: q, mode: 'insensitive' } }
       ]
     },
     orderBy: [{ sku: 'asc' }, { name: 'asc' }],
-    take: 25,
-    select: {
-      id: true,
-      cin7Id: true,
-      sku: true,
-      name: true,
-      barcode: true,
-      uom: true
-    }
+    take: 100,
+    select: { id: true, sku: true, name: true }
   });
 
   return NextResponse.json({ products });
