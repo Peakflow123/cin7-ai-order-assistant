@@ -5,25 +5,48 @@ import { useState } from 'react';
 export default function AdminCin7SyncButton({ companyId, hasCin7 }: { companyId: string; hasCin7: boolean }) {
   const [syncing, setSyncing] = useState(false);
 
+  async function postJson(url: string, body: any) {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const text = await response.text();
+    let data: any = {};
+    try { data = text ? JSON.parse(text) : {}; } catch { data = { message: text }; }
+    if (!response.ok) throw new Error(data.message || 'Cin7 Core refresh failed.');
+    return data;
+  }
+
+  async function refreshEntity(entity: 'Product' | 'Customer', totals: any) {
+    for (let page = 1; page <= 100; page += 1) {
+      const data = await postJson(`/api/admin/companies/${companyId}/cin7-refresh-step`, { entity, page, since: null });
+      if (entity === 'Product') {
+        totals.productsCreated += data.created || 0;
+        totals.productsUpdated += data.updated || 0;
+        totals.productsSkipped += data.skipped || 0;
+      } else {
+        totals.customersCreated += data.created || 0;
+        totals.customersUpdated += data.updated || 0;
+        totals.customersSkipped += data.skipped || 0;
+      }
+      if (data.done) break;
+    }
+  }
+
   async function refresh() {
     setSyncing(true);
+    const totals = { productsCreated: 0, productsUpdated: 0, productsSkipped: 0, customersCreated: 0, customersUpdated: 0, customersSkipped: 0 };
     try {
-      const response = await fetch(`/api/admin/companies/${companyId}/cin7-refresh`, { method: 'POST' });
-      const text = await response.text();
-      let data: any = {};
-      try { data = text ? JSON.parse(text) : {}; } catch { data = { message: text }; }
-      setSyncing(false);
-
-      if (!response.ok) {
-        alert(data.message || 'Cin7 Core refresh failed.');
-        return;
-      }
-
-      alert(data.message || 'Cin7 Core refresh completed.');
+      await refreshEntity('Product', totals);
+      await refreshEntity('Customer', totals);
+      const complete = await postJson(`/api/admin/companies/${companyId}/cin7-refresh-complete`, totals);
+      alert(complete.message || 'Cin7 Core refresh completed.');
       window.location.reload();
     } catch (error) {
-      setSyncing(false);
       alert(error instanceof Error ? error.message : 'Cin7 Core refresh failed.');
+    } finally {
+      setSyncing(false);
     }
   }
 

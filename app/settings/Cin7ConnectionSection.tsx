@@ -12,6 +12,20 @@ type Props = {
   lastCustomersSync?: string | null;
 };
 
+type Totals = {
+  productsCreated: number;
+  productsUpdated: number;
+  productsSkipped: number;
+  customersCreated: number;
+  customersUpdated: number;
+  customersSkipped: number;
+};
+
+function warningFromError(error: unknown) {
+  if (error instanceof Error) return error.message;
+  return 'Cin7 Core refresh failed.';
+}
+
 export default function Cin7ConnectionSection({ accountId, apiKey, hasConnection, lastStatus, lastMessage, lastProductsSync, lastCustomersSync }: Props) {
   const [account, setAccount] = useState(accountId || '');
   const [key, setKey] = useState(apiKey || '');
@@ -34,26 +48,52 @@ export default function Cin7ConnectionSection({ accountId, apiKey, hasConnection
     setMessage(text || (response.ok ? 'Saved.' : 'Could not save Cin7 Core settings.'));
   }
 
-  async function refresh() {
-    setSyncing(true);
-    setMessage('Refreshing Cin7 Core products and customers...');
+  async function postJson(url: string, body: any) {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const text = await response.text();
+    let data: any = {};
+    try { data = text ? JSON.parse(text) : {}; } catch { data = { message: text }; }
+    if (!response.ok) throw new Error(data.message || 'Cin7 Core refresh failed.');
+    return data;
+  }
 
-    try {
-      const response = await fetch('/api/settings/cin7/refresh', { method: 'POST' });
-      const text = await response.text();
-      let data: any = {};
-      try { data = text ? JSON.parse(text) : {}; } catch { data = { message: text }; }
-      setSyncing(false);
+  async function refreshEntity(entity: 'Product' | 'Customer', since: string | null, totals: Totals) {
+    for (let page = 1; page <= 100; page += 1) {
+      setMessage(`Refreshing ${entity === 'Product' ? 'products' : 'customers'} page ${page}...`);
+      const data = await postJson('/api/settings/cin7/refresh-step', { entity, page, since });
 
-      if (!response.ok) {
-        setMessage(data.message || 'Cin7 Core refresh failed.');
-        return;
+      if (entity === 'Product') {
+        totals.productsCreated += data.created || 0;
+        totals.productsUpdated += data.updated || 0;
+        totals.productsSkipped += data.skipped || 0;
+      } else {
+        totals.customersCreated += data.created || 0;
+        totals.customersUpdated += data.updated || 0;
+        totals.customersSkipped += data.skipped || 0;
       }
 
-      setMessage(data.message || 'Cin7 Core refresh completed.');
+      setMessage(`${entity} page ${page} processed. ${data.created || 0} created, ${data.updated || 0} updated, ${data.skipped || 0} skipped.`);
+      if (data.done) break;
+    }
+  }
+
+  async function refresh() {
+    setSyncing(true);
+    const totals: Totals = { productsCreated: 0, productsUpdated: 0, productsSkipped: 0, customersCreated: 0, customersUpdated: 0, customersSkipped: 0 };
+
+    try {
+      await refreshEntity('Product', lastProductsSync, totals);
+      await refreshEntity('Customer', lastCustomersSync, totals);
+      const complete = await postJson('/api/settings/cin7/refresh-complete', totals);
+      setMessage(complete.message || 'Cin7 Core refresh completed.');
     } catch (error) {
+      setMessage(warningFromError(error));
+    } finally {
       setSyncing(false);
-      setMessage(error instanceof Error ? error.message : 'Cin7 Core refresh failed.');
     }
   }
 
