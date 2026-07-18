@@ -2,8 +2,11 @@ import { prisma } from '@/lib/db';
 import { decrypt } from '@/lib/crypto';
 
 const DEFAULT_BASE_URL = 'https://inventory.dearsystems.com/ExternalApi/v2';
-const PAGE_LIMIT = 100;
-const MAX_FRONTEND_PAGES = 200;
+
+// IMPORTANT: Small batch size is intentional for Vercel.
+// Larger batches can finish the Cin7 GET but still timeout while saving rows to Supabase.
+const PAGE_LIMIT = 10;
+const MAX_FRONTEND_PAGES = 500;
 
 type Entity = 'Product' | 'Customer';
 
@@ -33,14 +36,7 @@ function listFromCin7Response(data: any, entity: Entity): any[] {
 
 function getCin7Id(item: Record<string, any>) {
   return String(
-    item.ID ||
-      item.Id ||
-      item.id ||
-      item.ProductID ||
-      item.ProductId ||
-      item.CustomerID ||
-      item.CustomerId ||
-      ''
+    item.ID || item.Id || item.id || item.ProductID || item.ProductId || item.CustomerID || item.CustomerId || ''
   ).trim();
 }
 
@@ -61,8 +57,6 @@ async function getCin7Page(connection: any, entity: Entity, page: number, since?
   const url = new URL(`${cleanBaseUrl(connection.baseUrl)}/${entity}`);
   url.searchParams.set('Page', String(page));
   url.searchParams.set('Limit', String(PAGE_LIMIT));
-
-  // If Cin7 Core accepts this filter, it will return less data. If not, local upsert still prevents duplicates.
   if (since) url.searchParams.set('LastModifiedOn', since);
 
   const response = await fetch(url.toString(), {
@@ -75,11 +69,7 @@ async function getCin7Page(connection: any, entity: Entity, page: number, since?
   });
 
   const text = await response.text();
-
-  if (!response.ok) {
-    throw new Error(`Cin7 Core ${entity} request failed ${response.status}: ${text.slice(0, 500)}`);
-  }
-
+  if (!response.ok) throw new Error(`Cin7 Core ${entity} request failed ${response.status}: ${text.slice(0, 500)}`);
   return text ? JSON.parse(text) : {};
 }
 
@@ -90,32 +80,13 @@ async function saveProductRows(companyId: string, rows: any[], since?: string | 
 
   for (const item of rows) {
     const cin7Id = getCin7Id(item);
-    if (!cin7Id) {
-      skipped += 1;
-      continue;
-    }
+    if (!cin7Id) { skipped += 1; continue; }
+    if (shouldSkipBecauseNotModified(item, since)) { skipped += 1; continue; }
 
-    if (shouldSkipBecauseNotModified(item, since)) {
-      skipped += 1;
-      continue;
-    }
-
-    const existing = await prisma.product.findUnique({
-      where: {
-        companyId_cin7Id: {
-          companyId,
-          cin7Id
-        }
-      }
-    });
+    const existing = await prisma.product.findUnique({ where: { companyId_cin7Id: { companyId, cin7Id } } });
 
     await prisma.product.upsert({
-      where: {
-        companyId_cin7Id: {
-          companyId,
-          cin7Id
-        }
-      },
+      where: { companyId_cin7Id: { companyId, cin7Id } },
       update: {
         sku: item.SKU || item.Sku || item.Code || null,
         name: item.Name || item.ProductName || item.SKU || item.Code || 'Unnamed Product',
@@ -148,35 +119,15 @@ async function saveCustomerRows(companyId: string, rows: any[], since?: string |
 
   for (const item of rows) {
     const cin7Id = getCin7Id(item);
-    if (!cin7Id) {
-      skipped += 1;
-      continue;
-    }
-
-    if (shouldSkipBecauseNotModified(item, since)) {
-      skipped += 1;
-      continue;
-    }
+    if (!cin7Id) { skipped += 1; continue; }
+    if (shouldSkipBecauseNotModified(item, since)) { skipped += 1; continue; }
 
     const contacts = Array.isArray(item.Contacts) ? item.Contacts : [];
     const firstContact = contacts[0] || {};
-
-    const existing = await prisma.customer.findUnique({
-      where: {
-        companyId_cin7Id: {
-          companyId,
-          cin7Id
-        }
-      }
-    });
+    const existing = await prisma.customer.findUnique({ where: { companyId_cin7Id: { companyId, cin7Id } } });
 
     await prisma.customer.upsert({
-      where: {
-        companyId_cin7Id: {
-          companyId,
-          cin7Id
-        }
-      },
+      where: { companyId_cin7Id: { companyId, cin7Id } },
       update: {
         name: item.Name || item.CustomerName || 'Unnamed Customer',
         email: item.Email || firstContact.Email || null,
@@ -198,33 +149,18 @@ async function saveCustomerRows(companyId: string, rows: any[], since?: string |
   return { created, updated, skipped };
 }
 
-export async function syncCin7Page(params: {
-  companyId: string;
-  entity: Entity;
-  page: number;
-  since?: string | null;
-}) {
-  if (params.page < 1 || params.page > MAX_FRONTEND_PAGES) {
-    throw new Error('Invalid Cin7 page number.');
-  }
+export async function syncCin7Page(params: { companyId: string; entity: Entity; page: number; since?: string | null }) {
+  if (params.page < 1 || params.page > MAX_FRONTEND_PAGES) throw new Error('Invalid Cin7 page number.');
 
-  const connection = await prisma.cin7Connection.findUnique({
-    where: {
-      companyId: params.companyId
-    }
-  });
-
-  if (!connection) {
-    throw new Error('Cin7 Core connection is not configured.');
-  }
+  const connection = await prisma.cin7Connection.findUnique({ where: { companyId: params.companyId } });
+  if (!connection) throw new Error('Cin7 Core connection is not configured.');
 
   const raw = await getCin7Page(connection, params.entity, params.page, params.since || null);
   const rows = listFromCin7Response(raw, params.entity);
 
-  const result =
-    params.entity === 'Product'
-      ? await saveProductRows(params.companyId, rows, params.since || null)
-      : await saveCustomerRows(params.companyId, rows, params.since || null);
+  const result = params.entity === 'Product'
+    ? await saveProductRows(params.companyId, rows, params.since || null)
+    : await saveCustomerRows(params.companyId, rows, params.since || null);
 
   return {
     entity: params.entity,
@@ -233,7 +169,8 @@ export async function syncCin7Page(params: {
     done: rows.length < PAGE_LIMIT,
     created: result.created,
     updated: result.updated,
-    skipped: result.skipped
+    skipped: result.skipped,
+    batchSize: PAGE_LIMIT
   };
 }
 
@@ -242,9 +179,7 @@ export async function completeCin7Refresh(companyId: string, summary: any) {
   const message = `Products: ${summary.productsCreated || 0} created, ${summary.productsUpdated || 0} updated, ${summary.productsSkipped || 0} skipped. Customers: ${summary.customersCreated || 0} created, ${summary.customersUpdated || 0} updated, ${summary.customersSkipped || 0} skipped.`;
 
   await prisma.integrationSyncState.upsert({
-    where: {
-      companyId
-    },
+    where: { companyId },
     update: {
       productsLastSyncedAt: now,
       customersLastSyncedAt: now,
@@ -260,9 +195,5 @@ export async function completeCin7Refresh(companyId: string, summary: any) {
     }
   });
 
-  return {
-    ok: true,
-    message,
-    syncedAt: now.toISOString()
-  };
+  return { ok: true, message, syncedAt: now.toISOString() };
 }
