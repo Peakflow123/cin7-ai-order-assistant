@@ -3,9 +3,9 @@ import { decrypt } from '@/lib/crypto';
 import { logActivity, logSystem } from '@/lib/activity';
 import type { Session } from '@/lib/auth';
 
-const PAGE_LIMIT = 50;
+const PAGE_LIMIT = 20;
 const DEFAULT_BASE_URL = 'https://inventory.dearsystems.com/ExternalApi/v2';
-const CIN7_REQUEST_TIMEOUT_MS = 12000;
+const CIN7_REQUEST_TIMEOUT_MS = 8000;
 
 function normalizeBaseUrl(baseUrl?: string | null) {
   return String(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, '');
@@ -34,7 +34,6 @@ function getModifiedDate(item: Record<string, any>) {
 async function cin7Get(connection: any, path: string, params: Record<string, string | number | undefined> = {}) {
   const baseUrl = normalizeBaseUrl(connection.baseUrl);
   const url = new URL(`${baseUrl}/${path.replace(/^\//, '')}`);
-
   Object.entries(params).forEach(([key, value]) => {
     if (value !== undefined && value !== '') url.searchParams.set(key, String(value));
   });
@@ -57,20 +56,15 @@ async function cin7Get(connection: any, path: string, params: Record<string, str
 
     if (response.status === 429) {
       const retryAfter = response.headers.get('retry-after') || '60';
-      const error: any = new Error(`Cin7 Core rate limit reached. Please wait ${retryAfter} seconds and try again.`);
+      const error: any = new Error(`Cin7 Core rate limit reached. Please wait ${retryAfter} seconds.`);
       error.rateLimited = true;
       throw error;
     }
 
-    if (!response.ok) {
-      throw new Error(`Cin7 Core API error ${response.status}: ${text.slice(0, 500)}`);
-    }
-
+    if (!response.ok) throw new Error(`Cin7 Core API error ${response.status}: ${text.slice(0, 500)}`);
     return text ? JSON.parse(text) : {};
   } catch (error: any) {
-    if (error?.name === 'AbortError') {
-      throw new Error('Cin7 Core API request took too long. The sync job was stopped safely. Please run refresh again or let the cron continue it.');
-    }
+    if (error?.name === 'AbortError') throw new Error('Cin7 Core API request timed out. The job is saved and can continue on the next cron run.');
     throw error;
   } finally {
     clearTimeout(timer);
@@ -93,12 +87,10 @@ async function syncProductPage(companyId: string, connection: any, page: number,
   for (const product of rows) {
     const cin7Id = getId(product);
     if (!cin7Id) { skipped += 1; continue; }
-
     const modified = getModifiedDate(product);
     if (since && modified && modified <= since) { skipped += 1; continue; }
 
     const existing = await prisma.product.findUnique({ where: { companyId_cin7Id: { companyId, cin7Id } } });
-
     await prisma.product.upsert({
       where: { companyId_cin7Id: { companyId, cin7Id } },
       update: {
@@ -118,9 +110,7 @@ async function syncProductPage(companyId: string, connection: any, page: number,
         status: product.Status || null
       }
     });
-
-    if (existing) updated += 1;
-    else created += 1;
+    if (existing) updated += 1; else created += 1;
   }
 
   return { fetched: rows.length, created, updated, skipped, done: rows.length < PAGE_LIMIT };
@@ -135,14 +125,12 @@ async function syncCustomerPage(companyId: string, connection: any, page: number
   for (const customer of rows) {
     const cin7Id = getId(customer);
     if (!cin7Id) { skipped += 1; continue; }
-
     const modified = getModifiedDate(customer);
     if (since && modified && modified <= since) { skipped += 1; continue; }
 
     const contacts = Array.isArray(customer.Contacts) ? customer.Contacts : [];
     const firstContact = contacts[0] || {};
     const existing = await prisma.customer.findUnique({ where: { companyId_cin7Id: { companyId, cin7Id } } });
-
     await prisma.customer.upsert({
       where: { companyId_cin7Id: { companyId, cin7Id } },
       update: {
@@ -158,9 +146,7 @@ async function syncCustomerPage(companyId: string, connection: any, page: number
         phone: customer.Phone || firstContact.Phone || firstContact.MobilePhone || null
       }
     });
-
-    if (existing) updated += 1;
-    else created += 1;
+    if (existing) updated += 1; else created += 1;
   }
 
   return { fetched: rows.length, created, updated, skipped, done: rows.length < PAGE_LIMIT };
@@ -174,7 +160,6 @@ export async function createCin7SyncJob(companyId: string, mode: string, session
     where: { companyId, status: { in: ['PENDING', 'RUNNING', 'PAUSED'] } },
     orderBy: { createdAt: 'desc' }
   });
-
   if (existing) return existing;
 
   const job = await prisma.cin7SyncJob.create({
@@ -184,11 +169,11 @@ export async function createCin7SyncJob(companyId: string, mode: string, session
       status: 'PENDING',
       phase: 'products',
       page: 1,
-      message: 'Sync queued. Products and customers will refresh in short batches.'
+      message: 'Sync queued. The background cron will process products/customers in safe batches.'
     }
   });
 
-  await logActivity({ session, companyId, action: 'CIN7_SYNC_QUEUED', entityType: 'Cin7SyncJob', entityId: job.id, message: 'Cin7 Core product/customer sync queued.' });
+  await logActivity({ session, companyId, action: 'CIN7_SYNC_QUEUED', entityType: 'Cin7SyncJob', entityId: job.id, message: 'Cin7 Core sync queued for background processing.' });
   return job;
 }
 
@@ -203,16 +188,10 @@ export async function runCin7SyncJob(jobId: string, session?: Session | null) {
   const state = await prisma.integrationSyncState.findUnique({ where: { companyId: job.companyId } }).catch(() => null);
   const productSince = state?.productsLastSyncedAt || null;
   const customerSince = state?.customersLastSyncedAt || null;
-  const now = new Date();
 
   job = await prisma.cin7SyncJob.update({
     where: { id: job.id },
-    data: {
-      status: 'RUNNING',
-      startedAt: job.startedAt || now,
-      error: null,
-      message: `Syncing ${job.phase}, page ${job.page}...`
-    }
+    data: { status: 'RUNNING', startedAt: job.startedAt || new Date(), error: null, message: `Processing ${job.phase}, page ${job.page}...` }
   });
 
   try {
@@ -227,8 +206,8 @@ export async function runCin7SyncJob(jobId: string, session?: Session | null) {
           productsSkipped: { increment: result.skipped },
           phase: result.done ? 'customers' : 'products',
           page: result.done ? 1 : job.page + 1,
-          status: 'RUNNING',
-          message: result.done ? 'Products finished. Starting customers...' : `Products page ${job.page} processed.`
+          status: result.done ? 'RUNNING' : 'PENDING',
+          message: result.done ? 'Products finished. Customers will start next.' : `Products page ${job.page} processed.`
         }
       });
     } else {
@@ -242,7 +221,7 @@ export async function runCin7SyncJob(jobId: string, session?: Session | null) {
           customersUpdated: { increment: result.updated },
           customersSkipped: { increment: result.skipped },
           page: completed ? job.page : job.page + 1,
-          status: completed ? 'COMPLETED' : 'RUNNING',
+          status: completed ? 'COMPLETED' : 'PENDING',
           finishedAt: completed ? new Date() : null,
           message: completed ? 'Cin7 Core product/customer refresh completed.' : `Customers page ${job.page} processed.`
         }
@@ -264,7 +243,6 @@ export async function runCin7SyncJob(jobId: string, session?: Session | null) {
     const isRateLimit = Boolean(error?.rateLimited);
     const message = error instanceof Error ? error.message : 'Unknown Cin7 Core sync error';
     const status = isRateLimit ? 'PAUSED' : 'FAILED';
-
     const failedJob = await prisma.cin7SyncJob.update({ where: { id: job.id }, data: { status, error: message, message } });
     await logSystem({ companyId: job.companyId, level: isRateLimit ? 'WARNING' : 'ERROR', source: 'cin7-sync', message, details: { jobId: job.id } });
     return failedJob;
@@ -286,7 +264,7 @@ export async function runDueCin7SyncJobs() {
       ]
     },
     select: { id: true },
-    take: 5
+    take: 2
   });
 
   for (const company of dueCompanies) {
@@ -296,13 +274,12 @@ export async function runDueCin7SyncJobs() {
   const jobs = await prisma.cin7SyncJob.findMany({
     where: { status: { in: ['PENDING', 'RUNNING', 'PAUSED'] } },
     orderBy: { updatedAt: 'asc' },
-    take: 5
+    take: 1
   });
 
   const results = [];
   for (const job of jobs) {
     results.push(await runCin7SyncJob(job.id));
   }
-
   return results;
 }

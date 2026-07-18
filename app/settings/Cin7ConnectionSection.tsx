@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 
 type Props = {
   canEdit: boolean;
@@ -19,11 +19,9 @@ type Job = {
   page: number;
   message?: string | null;
   error?: string | null;
-  productsFetched: number;
   productsCreated: number;
   productsUpdated: number;
   productsSkipped: number;
-  customersFetched: number;
   customersCreated: number;
   customersUpdated: number;
   customersSkipped: number;
@@ -33,16 +31,6 @@ function jobSummary(job: Job) {
   return `Products: ${job.productsCreated} created, ${job.productsUpdated} updated, ${job.productsSkipped} skipped. Customers: ${job.customersCreated} created, ${job.customersUpdated} updated, ${job.customersSkipped} skipped.`;
 }
 
-async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...options, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 export default function Cin7ConnectionSection({ canEdit, hasConnection, accountId, lastStatus, lastMessage, lastProductsSync, lastCustomersSync }: Props) {
   const [account, setAccount] = useState(accountId || '');
   const [apiKey, setApiKey] = useState('');
@@ -50,111 +38,52 @@ export default function Cin7ConnectionSection({ canEdit, hasConnection, accountI
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [job, setJob] = useState<Job | null>(null);
-  const cancelledRef = useRef(false);
 
   const locked = hasConnection && !canEdit;
   const showFields = !hasConnection || canEdit;
 
-  useEffect(() => {
-    cancelledRef.current = false;
-    return () => { cancelledRef.current = true; };
-  }, []);
-
   async function save() {
     setSaving(true);
     setMessage('Saving Cin7 connection...');
-
     const response = await fetch('/api/settings/cin7', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ accountId: account, apiKey })
     });
-
     const text = await response.text();
     setSaving(false);
     setMessage(text || (response.ok ? 'Saved.' : 'Could not save Cin7 settings.'));
     if (response.ok) setApiKey('');
   }
 
-  async function getJob(jobId: string) {
+  async function checkJob(jobId: string) {
     const response = await fetch(`/api/sync-jobs/${jobId}`, { method: 'GET', cache: 'no-store' });
-    if (!response.ok) return null;
-    return await response.json() as Job;
-  }
-
-  async function runOneStep(jobId: string) {
-    const response = await fetchWithTimeout(`/api/sync-jobs/${jobId}/run`, { method: 'POST' }, 25000);
-    const data = await response.json().catch(async () => ({ message: await response.text() })) as Job | { message?: string };
-
-    if (!response.ok) {
-      throw new Error('message' in data && data.message ? data.message : 'Cin7 refresh failed.');
-    }
-
-    return data as Job;
-  }
-
-  async function runJob(jobId: string) {
-    for (let i = 0; i < 500; i += 1) {
-      if (cancelledRef.current) return;
-
-      try {
-        setMessage('Processing next small batch...');
-        const current = await runOneStep(jobId);
-        setJob(current);
-        setMessage(current.message || `Refreshing ${current.phase}, page ${current.page}...`);
-
-        if (current.status === 'COMPLETED') {
-          setMessage(`Refresh complete. ${jobSummary(current)}`);
-          setSyncing(false);
-          return;
-        }
-
-        if (current.status === 'FAILED') {
-          setMessage(current.error || 'Cin7 refresh failed.');
-          setSyncing(false);
-          return;
-        }
-
-        if (current.status === 'PAUSED') {
-          setMessage(current.error || 'Cin7 Core rate limit reached. Waiting before continuing...');
-          await new Promise((resolve) => setTimeout(resolve, 60000));
-        } else {
-          await new Promise((resolve) => setTimeout(resolve, 1500));
-        }
-      } catch (error) {
-        const latest = await getJob(jobId);
-        if (latest) setJob(latest);
-
-        setMessage(error instanceof Error ? error.message : 'Cin7 refresh failed. Please check admin logs or try again later.');
-        setSyncing(false);
-        return;
-      }
-    }
-
-    setMessage('Cin7 refresh is still running. You can leave this page and continue later.');
-    setSyncing(false);
+    if (!response.ok) return;
+    const current = await response.json() as Job;
+    setJob(current);
+    setMessage(current.message || `Current status: ${current.status}. ${jobSummary(current)}`);
   }
 
   async function refresh() {
     setSyncing(true);
-    setMessage('Starting Cin7 product/customer refresh...');
+    setMessage('Queuing Cin7 product/customer refresh...');
 
     try {
-      const response = await fetchWithTimeout('/api/settings/cin7/sync/start', { method: 'POST' }, 15000);
+      const response = await fetch('/api/settings/cin7/sync/start', { method: 'POST' });
       const data = await response.json().catch(async () => ({ message: await response.text() })) as Job | { message?: string };
 
       if (!response.ok) {
-        setMessage('message' in data && data.message ? data.message : 'Could not start Cin7 refresh.');
+        setMessage('message' in data && data.message ? data.message : 'Could not queue Cin7 refresh.');
         setSyncing(false);
         return;
       }
 
-      const startedJob = data as Job;
-      setJob(startedJob);
-      setMessage(startedJob.message || 'Sync job started. Processing first batch...');
-      await runJob(startedJob.id);
+      const queuedJob = data as Job;
+      setJob(queuedJob);
+      setMessage('Cin7 refresh has been queued. It will process in the background through the Cin7 cron worker. You can leave this page.');
+      setSyncing(false);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Could not start Cin7 refresh.');
+      setMessage(error instanceof Error ? error.message : 'Could not queue Cin7 refresh.');
       setSyncing(false);
     }
   }
@@ -163,14 +92,14 @@ export default function Cin7ConnectionSection({ canEdit, hasConnection, accountI
     <section className="card space-y-5">
       <div>
         <h2 className="text-xl font-black">Cin7 Connection</h2>
-        <p className="page-subtitle">Connect once, then refresh products and customers when needed. Base URL is hidden and handled by the system.</p>
+        <p className="page-subtitle">Connect once, then queue product/customer refresh. Base URL is hidden and handled by the system.</p>
       </div>
 
       {locked && (
         <div className="soft-panel">
           <p className="font-bold">Cin7 connection is locked</p>
           <p className="mt-1 text-sm text-slate-500">Account ID: {accountId}</p>
-          <p className="mt-1 text-sm text-slate-500">Only the admin can allow credential editing. Refresh is still available.</p>
+          <p className="mt-1 text-sm text-slate-500">Only the admin can allow credential editing. Refresh queue is still available.</p>
         </div>
       )}
 
@@ -189,9 +118,12 @@ export default function Cin7ConnectionSection({ canEdit, hasConnection, accountI
 
       {lastMessage && <div className="soft-panel"><p className="font-bold">Last Sync Status: {lastStatus || 'Unknown'}</p><p className="text-sm text-slate-600">{lastMessage}</p></div>}
 
-      <button className="btn-secondary w-full md:w-auto" disabled={syncing || !hasConnection} onClick={refresh}>{syncing ? 'Refreshing...' : 'Refresh Products & Customers'}</button>
+      <div className="flex flex-wrap gap-2">
+        <button className="btn-secondary" disabled={syncing || !hasConnection} onClick={refresh}>{syncing ? 'Queuing...' : 'Queue Products & Customers Refresh'}</button>
+        {job && <button className="btn-secondary" onClick={() => checkJob(job.id)}>Check Refresh Status</button>}
+      </div>
 
-      {job && <div className="soft-panel"><p className="font-bold">Current refresh</p><p className="text-sm text-slate-500">Status: {job.status} • Step: {job.phase} • Page: {job.page}</p><p className="mt-1 text-sm text-slate-500">{jobSummary(job)}</p></div>}
+      {job && <div className="soft-panel"><p className="font-bold">Current refresh job</p><p className="text-sm text-slate-500">Status: {job.status} • Step: {job.phase} • Page: {job.page}</p><p className="mt-1 text-sm text-slate-500">{jobSummary(job)}</p></div>}
       {message && <p className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-semibold text-slate-700">{message}</p>}
     </section>
   );
