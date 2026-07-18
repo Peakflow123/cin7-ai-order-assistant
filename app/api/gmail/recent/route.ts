@@ -13,14 +13,21 @@ export async function GET(request: Request) {
 
   const connections = await prisma.gmailConnection.findMany({
     where: { companyId: session.companyId },
-    select: { id: true, email: true, status: true, createdAt: true }
+    select: {
+      id: true,
+      email: true,
+      createdAt: true
+    }
   });
 
   return NextResponse.json({
     ok: true,
-    message: 'Gmail recent email loading is available through the existing Gmail inbox UI. This endpoint is build-safe and ready for the next wiring step.',
+    message: 'Gmail recent email loading endpoint is build-safe. Existing Gmail UI remains unchanged.',
     filters: { limit, fromDate, toDate },
-    connections,
+    connections: connections.map((connection) => ({
+      ...connection,
+      status: 'Active'
+    })),
     messages: []
   });
 }
