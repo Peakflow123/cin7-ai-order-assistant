@@ -21,7 +21,6 @@ export default function OutlookInboxClient({ connections }: { connections: Outlo
   const [messages, setMessages] = useState<OutlookMessage[]>([]);
   const [status, setStatus] = useState('');
   const [loading, setLoading] = useState(false);
-  const [includeNonOrders, setIncludeNonOrders] = useState(true);
   const [useAiClassification, setUseAiClassification] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [maxResults, setMaxResults] = useState(50);
@@ -45,7 +44,7 @@ export default function OutlookInboxClient({ connections }: { connections: Outlo
     const params = new URLSearchParams({
       connectionId: selectedConnectionId,
       maxResults: String(maxResults),
-      includeNonOrders: String(includeNonOrders),
+      includeNonOrders: 'true',
       classify: String(useAiClassification)
     });
     if (fromDate) params.set('fromDate', fromDate);
@@ -84,7 +83,7 @@ export default function OutlookInboxClient({ connections }: { connections: Outlo
         <label className="text-sm font-bold text-slate-700">Load<select className="input mt-1" value={maxResults} onChange={(event) => setMaxResults(Number(event.target.value))}><option value={25}>Last 25 emails</option><option value={50}>Last 50 emails</option><option value={100}>Last 100 emails</option></select></label>
         <label className="text-sm font-bold text-slate-700">From date<input className="input mt-1" type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} /></label>
         <label className="text-sm font-bold text-slate-700">To date<input className="input mt-1" type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} /></label>
-        <div className="mt-7 space-y-2"><label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={includeNonOrders} onChange={(event) => setIncludeNonOrders(event.target.checked)} /> Include all emails</label><label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={useAiClassification} onChange={(event) => setUseAiClassification(event.target.checked)} /> Use AI classification on load</label></div>
+        <div className="mt-7"><label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={useAiClassification} onChange={(event) => setUseAiClassification(event.target.checked)} /> Use AI classification on load</label></div>
       </div>
       {status && <p className="rounded-2xl bg-slate-50 p-3 text-sm text-slate-700">{status}</p>}
       <div className="space-y-3">{filteredMessages.map((message) => <div key={message.id} className="rounded-2xl border border-slate-200 bg-white p-4"><div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between"><div className="min-w-0"><div className="mb-2 flex flex-wrap items-center gap-2"><span className={badgeClass(message.classification.category)}>{message.classification.category}</span><span className="badge badge-gray">{Math.round(message.classification.confidence * 100)}%</span>{message.alreadyProcessed && <span className="badge badge-green">Processed</span>}</div><p className="font-semibold text-slate-950">{message.subject}</p><p className="text-sm text-slate-500">From: {message.from}</p><p className="text-sm text-slate-500">Date: {message.date}</p><p className="mt-2 text-sm text-slate-700">{message.snippet}</p><p className="mt-2 text-xs text-slate-500">{message.classification.reason}</p>{message.hasAttachments && <p className="mt-2 text-xs text-slate-500">Attachments detected{message.attachmentNames.length ? `: ${message.attachmentNames.join(', ')}` : ''}</p>}</div><div className="flex shrink-0 flex-col gap-2"><button className="btn-secondary" disabled={processingId === message.id || message.alreadyProcessed || (useAiClassification && message.classification.category === 'NOT_ORDER')} onClick={() => processMessage(message.id)}>{message.alreadyProcessed ? 'Processed' : processingId === message.id ? 'Processing...' : 'Process Email'}</button>{useAiClassification && message.classification.category === 'NOT_ORDER' && !message.alreadyProcessed && <button className="btn-secondary" disabled={processingId === message.id} onClick={() => processMessage(message.id, true)}>Process Anyway</button>}</div></div></div>)}</div>

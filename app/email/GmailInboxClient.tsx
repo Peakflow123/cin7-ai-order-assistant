@@ -33,7 +33,6 @@ export default function GmailInboxClient({ connections }: { connections: GmailCo
   const [messages, setMessages] = useState<GmailMessage[]>([]);
   const [status, setStatus] = useState('');
   const [loading, setLoading] = useState(false);
-  const [includeNonOrders, setIncludeNonOrders] = useState(true);
   const [useAiClassification, setUseAiClassification] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [maxResults, setMaxResults] = useState(50);
@@ -57,7 +56,7 @@ export default function GmailInboxClient({ connections }: { connections: GmailCo
     const params = new URLSearchParams({
       connectionId: selectedConnectionId,
       maxResults: String(maxResults),
-      includeNonOrders: String(includeNonOrders),
+      includeNonOrders: 'true',
       classify: String(useAiClassification)
     });
     if (fromDate) params.set('fromDate', fromDate);
@@ -137,8 +136,7 @@ export default function GmailInboxClient({ connections }: { connections: GmailCo
         </label>
         <label className="text-sm font-bold text-slate-700">From date<input className="input mt-1" type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} /></label>
         <label className="text-sm font-bold text-slate-700">To date<input className="input mt-1" type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} /></label>
-        <div className="mt-7 space-y-2">
-          <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={includeNonOrders} onChange={(event) => setIncludeNonOrders(event.target.checked)} /> Include all emails</label>
+        <div className="mt-7">
           <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={useAiClassification} onChange={(event) => setUseAiClassification(event.target.checked)} /> Use AI classification on load</label>
         </div>
       </div>
