@@ -33,7 +33,8 @@ export default function GmailInboxClient({ connections }: { connections: GmailCo
   const [messages, setMessages] = useState<GmailMessage[]>([]);
   const [status, setStatus] = useState('');
   const [loading, setLoading] = useState(false);
-  const [includeNonOrders, setIncludeNonOrders] = useState(false);
+  const [includeNonOrders, setIncludeNonOrders] = useState(true);
+  const [useAiClassification, setUseAiClassification] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [maxResults, setMaxResults] = useState(50);
   const [fromDate, setFromDate] = useState('');
@@ -51,12 +52,13 @@ export default function GmailInboxClient({ connections }: { connections: GmailCo
   async function loadInbox() {
     if (!selectedConnectionId) return;
     setLoading(true);
-    setStatus('Loading Gmail messages with lightweight AI classification...');
+    setStatus(useAiClassification ? 'Loading Gmail messages with AI classification...' : 'Loading Gmail messages in fast mode...');
 
     const params = new URLSearchParams({
       connectionId: selectedConnectionId,
       maxResults: String(maxResults),
-      includeNonOrders: String(includeNonOrders)
+      includeNonOrders: String(includeNonOrders),
+      classify: String(useAiClassification)
     });
     if (fromDate) params.set('fromDate', fromDate);
     if (toDate) params.set('toDate', toDate);
@@ -71,7 +73,7 @@ export default function GmailInboxClient({ connections }: { connections: GmailCo
     }
 
     setMessages(data.messages || []);
-    setStatus(`Loaded ${(data.messages || []).length} Gmail messages. Attachments are read only when you click Process Email.`);
+    setStatus(`Loaded ${(data.messages || []).length} Gmail messages${useAiClassification ? ' with AI classification' : ' in fast mode'}. Full email and attachments are read only when you click Process Email.`);
     setLoading(false);
   }
 
@@ -115,7 +117,7 @@ export default function GmailInboxClient({ connections }: { connections: GmailCo
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h2 className="text-xl font-bold">Gmail Inbox Automation Test</h2>
-          <p className="text-sm text-slate-500">Load up to 100 Gmail messages, filter by date, and prevent duplicate processing.</p>
+          <p className="text-sm text-slate-500">Fast load shows emails quickly. AI classification can be enabled only when needed.</p>
         </div>
         <div className="flex flex-col gap-2 md:flex-row">
           <select className="input md:w-80" value={selectedConnectionId} onChange={(event) => setSelectedConnectionId(event.target.value)}>
@@ -135,7 +137,10 @@ export default function GmailInboxClient({ connections }: { connections: GmailCo
         </label>
         <label className="text-sm font-bold text-slate-700">From date<input className="input mt-1" type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} /></label>
         <label className="text-sm font-bold text-slate-700">To date<input className="input mt-1" type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} /></label>
-        <label className="mt-7 flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={includeNonOrders} onChange={(event) => setIncludeNonOrders(event.target.checked)} /> Include emails AI thinks are not orders</label>
+        <div className="mt-7 space-y-2">
+          <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={includeNonOrders} onChange={(event) => setIncludeNonOrders(event.target.checked)} /> Include all emails</label>
+          <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={useAiClassification} onChange={(event) => setUseAiClassification(event.target.checked)} /> Use AI classification on load</label>
+        </div>
       </div>
 
       {status && <p className="rounded-2xl bg-slate-50 p-3 text-sm text-slate-700">{status}</p>}
@@ -154,14 +159,14 @@ export default function GmailInboxClient({ connections }: { connections: GmailCo
                 <p className="text-sm text-slate-500">From: {message.from}</p>
                 <p className="text-sm text-slate-500">Date: {message.date}</p>
                 <p className="mt-2 text-sm text-slate-700">{message.snippet}</p>
-                <p className="mt-2 text-xs text-slate-500">AI reason: {message.classification.reason}</p>
-                {message.hasAttachments && <p className="mt-2 text-xs text-slate-500">Attachments: {message.attachmentNames.join(', ')}</p>}
+                <p className="mt-2 text-xs text-slate-500">{message.classification.reason}</p>
+                {message.hasAttachments && <p className="mt-2 text-xs text-slate-500">Attachments detected{message.attachmentNames.length ? `: ${message.attachmentNames.join(', ')}` : ''}</p>}
               </div>
               <div className="flex shrink-0 flex-col gap-2">
-                <button className="btn-secondary" disabled={processingId === message.id || message.alreadyProcessed || message.classification.category === 'NOT_ORDER'} onClick={() => processMessage(message.id)}>
+                <button className="btn-secondary" disabled={processingId === message.id || message.alreadyProcessed || (useAiClassification && message.classification.category === 'NOT_ORDER')} onClick={() => processMessage(message.id)}>
                   {message.alreadyProcessed ? 'Processed' : processingId === message.id ? 'Processing...' : 'Process Email'}
                 </button>
-                {message.classification.category === 'NOT_ORDER' && !message.alreadyProcessed && (
+                {useAiClassification && message.classification.category === 'NOT_ORDER' && !message.alreadyProcessed && (
                   <button className="btn-secondary" disabled={processingId === message.id} onClick={() => processMessage(message.id, true)}>Process Anyway</button>
                 )}
               </div>
