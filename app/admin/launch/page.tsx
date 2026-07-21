@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getSession, isPlatformAdmin } from '@/lib/auth';
 import { getLaunchSummary } from '@/lib/admin-launch-safe';
+import AdminPortalShell from './AdminPortalShell';
 
 function statusBadge(active: boolean, archived: boolean) {
   if (archived) return 'badge badge-gray';
@@ -19,31 +20,33 @@ export default async function LaunchControlCenter() {
     clients: acc.clients + 1,
     orders: acc.orders + Number(c.orders || 0),
     needsReview: acc.needsReview + Number(c.needsReview || 0),
-    errors: acc.errors + Number(c.errorOrders || 0)
-  }), { clients: 0, orders: 0, needsReview: 0, errors: 0 });
+    errors: acc.errors + Number(c.errorOrders || 0),
+    gmail: acc.gmail + Number(c.gmailConnections || 0),
+    outlook: acc.outlook + Number(c.outlookConnections || 0)
+  }), { clients: 0, orders: 0, needsReview: 0, errors: 0, gmail: 0, outlook: 0 });
 
   return (
-    <main className="page-shell space-y-6">
-      <section className="hero-card">
-        <Link href="/admin" className="text-sm font-bold text-blue-700">Back to Admin</Link>
-        <h1 className="page-title mt-2">Launch Control Center</h1>
-        <p className="page-subtitle">Operational dashboard for onboarding, monitoring, usage and client controls.</p>
-        <div className="mt-4 flex flex-wrap gap-2">
-          <Link className="btn-secondary" href="/admin/launch/clients">Clients</Link>
-          <Link className="btn-secondary" href="/admin/launch/usage">Usage & Storage</Link>
-          <Link className="btn-secondary" href="/admin/launch/activity">Activity</Link>
-          <Link className="btn-secondary" href="/admin/launch/errors">Errors</Link>
-          <Link className="btn-secondary" href="/admin/launch/backups">Backups</Link>
-        </div>
-      </section>
-      <section className="grid gap-4 md:grid-cols-4">
+    <AdminPortalShell title="Launch Control Center" subtitle="A single command center for client control, usage, monitoring, errors and launch readiness.">
+      <section className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
         <div className="card"><p className="section-label">Clients</p><p className="text-3xl font-black">{totals.clients}</p></div>
         <div className="card"><p className="section-label">Orders</p><p className="text-3xl font-black">{totals.orders}</p></div>
-        <div className="card"><p className="section-label">Needs review</p><p className="text-3xl font-black">{totals.needsReview}</p></div>
+        <div className="card"><p className="section-label">Needs Review</p><p className="text-3xl font-black">{totals.needsReview}</p></div>
         <div className="card"><p className="section-label">Errors</p><p className="text-3xl font-black">{totals.errors}</p></div>
+        <div className="card"><p className="section-label">Gmail</p><p className="text-3xl font-black">{totals.gmail}</p></div>
+        <div className="card"><p className="section-label">Outlook</p><p className="text-3xl font-black">{totals.outlook}</p></div>
       </section>
+
+      <section className="grid gap-4 xl:grid-cols-3">
+        <Link className="card transition hover:border-blue-200 hover:bg-blue-50" href="/admin/launch/clients"><h2 className="text-xl font-black">Clients & Controls</h2><p className="mt-2 text-slate-500">Activate, archive, set plan limits and delete test clients.</p></Link>
+        <Link className="card transition hover:border-blue-200 hover:bg-blue-50" href="/admin/launch/usage"><h2 className="text-xl font-black">Usage & Storage</h2><p className="mt-2 text-slate-500">Track approximate database usage per customer.</p></Link>
+        <Link className="card transition hover:border-blue-200 hover:bg-blue-50" href="/admin/launch/errors"><h2 className="text-xl font-black">Error Monitoring</h2><p className="mt-2 text-slate-500">Review failed orders and operational issues.</p></Link>
+      </section>
+
       <section className="card space-y-3">
-        <h2 className="text-xl font-black">Client overview</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-black">Client Snapshot</h2>
+          <Link className="btn-secondary" href="/admin/launch/clients">Manage All</Link>
+        </div>
         {clients.map((client) => (
           <div key={client.id} className="rounded-2xl border border-slate-200 bg-white p-4">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -60,6 +63,6 @@ export default async function LaunchControlCenter() {
           </div>
         ))}
       </section>
-    </main>
+    </AdminPortalShell>
   );
 }
