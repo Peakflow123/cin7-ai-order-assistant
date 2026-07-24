@@ -1,13 +1,12 @@
 import Link from 'next/link';
 
 const navItems = [
-  { href: '/admin/launch', label: 'Overview', description: 'Main command center' },
-  { href: '/admin/launch/clients', label: 'Clients', description: 'Controls and lifecycle' },
-  { href: '/admin/launch/usage', label: 'Usage & Storage', description: 'Client usage and capacity' },
+  { href: '/admin/launch', label: 'Overview', description: 'Command center' },
+  { href: '/admin/launch/clients', label: 'Clients & Controls', description: 'Client limits and permissions' },
+  { href: '/admin/launch/usage', label: 'Usage & Storage', description: 'Storage and volume' },
   { href: '/admin/launch/activity', label: 'Activity', description: 'Admin action history' },
-  { href: '/admin/launch/errors', label: 'Errors', description: 'Failed orders and issues' },
-  { href: '/admin/launch/backups', label: 'Backups', description: 'Recovery checklist' },
-  { href: '/admin', label: 'Classic Admin', description: 'Existing admin area' }
+  { href: '/admin/launch/errors', label: 'Errors', description: 'Failed orders' },
+  { href: '/admin/launch/backups', label: 'Backups', description: 'Recovery checklist' }
 ];
 
 export default function AdminPortalShell({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
@@ -18,8 +17,8 @@ export default function AdminPortalShell({ title, subtitle, children }: { title:
           <div className="sticky top-6 space-y-4 rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
             <div className="rounded-[1.5rem] bg-gradient-to-br from-blue-700 via-cyan-600 to-emerald-500 p-5 text-white shadow-sm">
               <p className="text-xs font-bold uppercase tracking-[0.25em] text-white/75">NexOrder AI</p>
-              <h1 className="mt-2 text-2xl font-black">Admin Portal</h1>
-              <p className="mt-2 text-sm text-white/80">One place to manage clients, usage, monitoring and launch readiness.</p>
+              <h1 className="mt-2 text-2xl font-black">Admin Control Center</h1>
+              <p className="mt-2 text-sm text-white/80">One complete portal for clients, limits, usage and monitoring.</p>
             </div>
             <nav className="space-y-2">
               {navItems.map((item) => (
@@ -34,19 +33,11 @@ export default function AdminPortalShell({ title, subtitle, children }: { title:
 
         <section className="min-w-0 flex-1 space-y-6">
           <header className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-[0.25em] text-blue-700">Admin Portal</p>
-                <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-950 md:text-4xl">{title}</h1>
-                <p className="mt-2 max-w-3xl text-slate-600">{subtitle}</p>
-              </div>
-              <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-                {navItems.slice(0, 6).map((item) => (
-                  <Link key={item.href} href={item.href} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 text-center text-sm font-bold text-slate-700 hover:bg-blue-50 hover:text-blue-700">
-                    {item.label}
-                  </Link>
-                ))}
-              </div>
+            <p className="text-xs font-bold uppercase tracking-[0.25em] text-blue-700">Admin Portal</p>
+            <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-950 md:text-4xl">{title}</h1>
+            <p className="mt-2 max-w-4xl text-slate-600">{subtitle}</p>
+            <div className="mt-5 flex flex-wrap gap-2">
+              {navItems.map((item) => <Link key={item.href} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-bold text-slate-700 hover:bg-blue-50 hover:text-blue-700" href={item.href}>{item.label}</Link>)}
             </div>
           </header>
           {children}
