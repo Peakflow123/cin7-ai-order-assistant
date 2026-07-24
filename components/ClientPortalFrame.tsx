@@ -4,6 +4,7 @@ import '@/app/client-portal.css';
 const desktopNav = [
   { href: '/dashboard', label: 'Dashboard' },
   { href: '/orders', label: 'Orders' },
+  { href: '/mobile', label: 'Review Orders' },
   { href: '/email', label: 'Channels' },
   { href: '/settings', label: 'Settings' }
 ];
@@ -11,8 +12,8 @@ const desktopNav = [
 const mobileNav = [
   { href: '/dashboard', label: 'Dashboard', icon: '⌂' },
   { href: '/orders', label: 'Orders', icon: '▦' },
-  { href: '/email', label: 'Channels', icon: '✉' },
   { href: '/mobile', label: 'Review', icon: '✓' },
+  { href: '/email', label: 'Channels', icon: '✉' },
   { href: '/settings', label: 'Settings', icon: '⚙' }
 ];
 

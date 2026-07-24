@@ -41,7 +41,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: {
               <p className="page-subtitle">Monitor order intake, review AI-created orders, and keep Cin7 products and customers ready for accurate matching.</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Link className="btn-secondary" href="/mobile">Review Queue</Link>
+              <Link className="btn-secondary" href="/mobile">Review Orders</Link>
             </div>
           </div>
         </section>

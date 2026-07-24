@@ -15,8 +15,13 @@
   --nx-radius: 26px;
 }
 
-/* Hide the older global client header only when the new client portal frame is present. */
-body:has(.client-portal) > header:not(.client-topbar) {
+/* Hide the older global client header only on client portal screens. */
+body:has(.client-portal) > header:not(.client-topbar),
+body:has(.client-portal) > nav:not(.client-mobile-nav),
+body:has(.client-portal) > div > header:not(.client-topbar),
+body:has(.client-portal) .app-header:not(.client-topbar),
+body:has(.client-portal) .site-header:not(.client-topbar),
+body:has(.client-portal) .top-nav:not(.client-topbar) {
   display: none !important;
 }
 
