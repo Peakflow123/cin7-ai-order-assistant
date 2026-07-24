@@ -15,7 +15,6 @@
   --nx-radius: 26px;
 }
 
-/* Hide the older global client header only when the client portal frame is active. */
 body:has(.client-portal) > header:not(.client-topbar),
 body:has(.client-portal) > nav:not(.client-mobile-nav),
 body:has(.client-portal) > div > header:not(.client-topbar),
@@ -25,6 +24,10 @@ body:has(.client-portal) .top-nav:not(.client-topbar) {
   display: none !important;
 }
 
+.client-portal, .client-portal * {
+  box-sizing: border-box;
+}
+
 .client-portal {
   min-height: 100vh;
   background:
@@ -32,6 +35,7 @@ body:has(.client-portal) .top-nav:not(.client-topbar) {
     radial-gradient(circle at top right, rgba(8, 145, 178, 0.10), transparent 30rem),
     linear-gradient(180deg, #f8fbff 0%, var(--nx-bg) 48%, #eef4fb 100%);
   color: var(--nx-ink);
+  overflow-x: hidden;
 }
 
 .client-portal .page-shell {
@@ -194,6 +198,7 @@ body:has(.client-portal) .top-nav:not(.client-topbar) {
   background: var(--nx-card);
   box-shadow: 0 12px 36px rgba(15, 23, 42, 0.055);
   padding: 22px;
+  overflow: hidden;
 }
 
 .client-portal .soft-panel {
@@ -214,6 +219,8 @@ body:has(.client-portal) .top-nav:not(.client-topbar) {
 
 .client-portal .input {
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
   border: 1px solid rgba(148, 163, 184, 0.34);
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.94);
@@ -223,6 +230,16 @@ body:has(.client-portal) .top-nav:not(.client-topbar) {
   transition: border-color .15s ease, box-shadow .15s ease;
 }
 .client-portal .input:focus { border-color: rgba(37,99,235,.75); box-shadow: 0 0 0 4px rgba(37,99,235,.10); }
+
+.client-portal input[type="date"].input,
+.client-portal input[type="date"] {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  -webkit-appearance: none;
+  appearance: none;
+}
 
 .client-portal .btn,
 .client-portal .btn-secondary,
@@ -309,4 +326,46 @@ body:has(.client-portal) .top-nav:not(.client-topbar) {
   .client-grid-4, .client-grid-3, .client-grid-2 { grid-template-columns: 1fr; }
   .client-hero, .client-portal .card { border-radius: 24px; padding: 18px; }
   .client-portal .page-title { font-size: clamp(1.8rem, 11vw, 2.5rem); }
+
+  .client-portal form,
+  .client-portal label,
+  .client-portal .grid,
+  .client-portal .flex,
+  .client-portal .card > * {
+    max-width: 100%;
+  }
+
+  .client-portal [class*="grid-cols"],
+  .client-portal .md\:grid-cols-4,
+  .client-portal .md\:grid-cols-5,
+  .client-portal .md\:grid-cols-3,
+  .client-portal .md\:grid-cols-2 {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .client-portal .md\:col-span-2,
+  .client-portal .md\:col-span-3,
+  .client-portal .md\:col-span-4,
+  .client-portal .md\:col-span-5 {
+    grid-column: auto !important;
+  }
+
+  .client-portal .flex.items-end,
+  .client-portal .flex.justify-end {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .client-portal .flex.items-end > *,
+  .client-portal .flex.justify-end > * {
+    min-width: 0;
+  }
+
+  .client-portal input[type="date"],
+  .client-portal input[type="date"].input {
+    height: 56px;
+    padding-left: 14px;
+    padding-right: 14px;
+    font-size: 16px;
+  }
 }
