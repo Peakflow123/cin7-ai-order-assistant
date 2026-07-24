@@ -15,7 +15,7 @@
   --nx-radius: 26px;
 }
 
-/* Hide the older global client header only on client portal screens. */
+/* Hide the older global client header only when the client portal frame is active. */
 body:has(.client-portal) > header:not(.client-topbar),
 body:has(.client-portal) > nav:not(.client-mobile-nav),
 body:has(.client-portal) > div > header:not(.client-topbar),
@@ -43,9 +43,9 @@ body:has(.client-portal) .top-nav:not(.client-topbar) {
 .client-topbar {
   position: sticky;
   top: 0;
-  z-index: 40;
+  z-index: 80;
   border-bottom: 1px solid var(--nx-border);
-  background: rgba(255, 255, 255, 0.88);
+  background: rgba(255, 255, 255, 0.92);
   backdrop-filter: blur(18px);
 }
 
@@ -64,11 +64,13 @@ body:has(.client-portal) .top-nav:not(.client-topbar) {
   align-items: center;
   gap: 12px;
   text-decoration: none;
+  min-width: 0;
 }
 
 .client-brand-mark {
   width: 42px;
   height: 42px;
+  min-width: 42px;
   border-radius: 16px;
   background: linear-gradient(135deg, var(--nx-blue), var(--nx-cyan) 58%, var(--nx-green));
   display: grid;
@@ -78,9 +80,9 @@ body:has(.client-portal) .top-nav:not(.client-topbar) {
   box-shadow: 0 14px 28px rgba(37, 99, 235, 0.22);
 }
 
-.client-brand-text { line-height: 1.05; }
-.client-brand-title { font-weight: 950; letter-spacing: -0.03em; color: var(--nx-ink); }
-.client-brand-subtitle { color: var(--nx-muted); font-size: 12px; font-weight: 800; margin-top: 4px; }
+.client-brand-text { line-height: 1.05; min-width: 0; }
+.client-brand-title { font-weight: 950; letter-spacing: -0.03em; color: var(--nx-ink); white-space: nowrap; }
+.client-brand-subtitle { color: var(--nx-muted); font-size: 12px; font-weight: 800; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px; }
 
 .client-nav {
   display: flex;
@@ -297,7 +299,12 @@ body:has(.client-portal) .top-nav:not(.client-topbar) {
 
 @media (max-width: 860px) {
   .client-portal .page-shell { width: min(100% - 24px, 1240px); padding-block: 18px 104px; }
-  .client-topbar { display: none; }
+  .client-topbar { display: block; }
+  .client-topbar-inner { width: min(100% - 28px, 1240px); padding: 14px 0; }
+  .client-nav { display: none; }
+  .client-brand-mark { width: 48px; height: 48px; min-width: 48px; border-radius: 18px; }
+  .client-brand-title { font-size: 20px; }
+  .client-brand-subtitle { max-width: 190px; font-size: 13px; }
   .client-mobile-nav { display: grid; }
   .client-grid-4, .client-grid-3, .client-grid-2 { grid-template-columns: 1fr; }
   .client-hero, .client-portal .card { border-radius: 24px; padding: 18px; }
