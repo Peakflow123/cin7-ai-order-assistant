@@ -4,17 +4,26 @@ import { getSession, isPlatformAdmin } from '@/lib/auth';
 import { prisma } from '@/lib/db';
 import ClientPortalFrame from '@/components/ClientPortalFrame';
 
-export default async function DashboardPage() {
+export default async function DashboardPage({ searchParams }: { searchParams?: { from?: string; to?: string } }) {
   const session = getSession();
   if (!session) redirect('/login');
   if (isPlatformAdmin(session)) redirect('/admin');
 
+  const from = searchParams?.from || '';
+  const to = searchParams?.to || '';
+  const orderDateWhere: any = { companyId: session.companyId };
+  if (from || to) {
+    orderDateWhere.createdAt = {};
+    if (from) orderDateWhere.createdAt.gte = new Date(`${from}T00:00:00.000Z`);
+    if (to) orderDateWhere.createdAt.lte = new Date(`${to}T23:59:59.999Z`);
+  }
+
   const [company, orderCount, needsReview, createdOrders, errorOrders, gmailCount, outlookCount, productCount, customerCount, recentOrders] = await Promise.all([
     prisma.company.findUnique({ where: { id: session.companyId } }),
-    prisma.order.count({ where: { companyId: session.companyId } }),
-    prisma.order.count({ where: { companyId: session.companyId, status: 'NEEDS_REVIEW' } }),
-    prisma.order.count({ where: { companyId: session.companyId, status: 'CREATED' } }),
-    prisma.order.count({ where: { companyId: session.companyId, status: 'ERROR' } }),
+    prisma.order.count({ where: orderDateWhere }),
+    prisma.order.count({ where: { ...orderDateWhere, status: 'NEEDS_REVIEW' } }),
+    prisma.order.count({ where: { ...orderDateWhere, status: 'CREATED' } }),
+    prisma.order.count({ where: { ...orderDateWhere, status: 'ERROR' } }),
     prisma.gmailConnection.count({ where: { companyId: session.companyId, isActive: true } }),
     prisma.outlookConnection.count({ where: { companyId: session.companyId, isActive: true } }),
     prisma.product.count({ where: { companyId: session.companyId } }),
@@ -23,25 +32,31 @@ export default async function DashboardPage() {
   ]);
 
   return (
-    <ClientPortalFrame>
+    <ClientPortalFrame companyName={company?.name}>
       <main className="page-shell space-y-6">
         <section className="client-hero">
           <div className="relative z-10 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <p className="section-label">Client workspace</p>
-              <h1 className="page-title mt-2">{company?.name || 'Dashboard'}</h1>
+              <h1 className="page-title">{company?.name || 'Dashboard'}</h1>
               <p className="page-subtitle">Monitor order intake, review AI-created orders, and keep Cin7 products and customers ready for accurate matching.</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Link className="btn" href="/email">Load Emails</Link>
               <Link className="btn-secondary" href="/mobile">Review Queue</Link>
             </div>
           </div>
         </section>
 
+        <section className="card">
+          <form className="grid gap-3 md:grid-cols-4" action="/dashboard">
+            <label><span className="section-label">From date</span><input className="input mt-1" type="date" name="from" defaultValue={from} /></label>
+            <label><span className="section-label">To date</span><input className="input mt-1" type="date" name="to" defaultValue={to} /></label>
+            <div className="flex items-end gap-2 md:col-span-2"><button className="btn" type="submit">Apply Date Filter</button><Link className="btn-secondary" href="/dashboard">Clear</Link></div>
+          </form>
+        </section>
+
         <section className="client-grid-4">
-          <div className="client-kpi"><p className="client-kpi-label">Total orders</p><p className="client-kpi-value">{orderCount}</p><p className="client-kpi-note">All imported and reviewed orders</p></div>
-          <div className="client-kpi"><p className="client-kpi-label">Needs review</p><p className="client-kpi-value">{needsReview}</p><p className="client-kpi-note">Waiting for human confirmation</p></div>
+          <div className="client-kpi"><p className="client-kpi-label">Total orders</p><p className="client-kpi-value">{orderCount}</p><p className="client-kpi-note">Selected date range</p></div>
+          <div className="client-kpi"><p className="client-kpi-label">Needs review</p><p className="client-kpi-value">{needsReview}</p><p className="client-kpi-note">Waiting for confirmation</p></div>
           <div className="client-kpi"><p className="client-kpi-label">Created in Cin7</p><p className="client-kpi-value">{createdOrders}</p><p className="client-kpi-note">Successfully pushed orders</p></div>
           <div className="client-kpi"><p className="client-kpi-label">Errors</p><p className="client-kpi-value">{errorOrders}</p><p className="client-kpi-note">Need attention</p></div>
         </section>

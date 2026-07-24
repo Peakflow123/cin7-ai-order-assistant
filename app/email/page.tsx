@@ -33,13 +33,13 @@ export default async function InputChannelsPage() {
   ]);
 
   return (
-    <ClientPortalFrame>
+    <ClientPortalFrame companyName={company.name}>
       <main className="page-shell space-y-6">
         <section className="client-hero">
           <div className="relative z-10">
             <Link href="/dashboard" className="text-sm font-bold text-blue-700 hover:text-blue-900">Back to Dashboard</Link>
-            <h1 className="page-title mt-2">Email Intake</h1>
-            <p className="page-subtitle">Connect Gmail and Outlook mailboxes, load recent emails, and process selected customer orders.</p>
+            <h1 className="page-title mt-2">Channels</h1>
+            <p className="page-subtitle">Connect Gmail and Outlook mailboxes, then load customer order emails for review and processing.</p>
           </div>
         </section>
 

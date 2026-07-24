@@ -1,6 +1,6 @@
 :root {
   --nx-bg: #f6f8fb;
-  --nx-card: rgba(255, 255, 255, 0.92);
+  --nx-card: rgba(255, 255, 255, 0.94);
   --nx-ink: #0f172a;
   --nx-muted: #64748b;
   --nx-border: rgba(148, 163, 184, 0.24);
@@ -13,6 +13,11 @@
   --nx-purple: #7c3aed;
   --nx-shadow: 0 22px 55px rgba(15, 23, 42, 0.08);
   --nx-radius: 26px;
+}
+
+/* Hide the older global client header only when the new client portal frame is present. */
+body:has(.client-portal) > header:not(.client-topbar) {
+  display: none !important;
 }
 
 .client-portal {
@@ -35,7 +40,7 @@
   top: 0;
   z-index: 40;
   border-bottom: 1px solid var(--nx-border);
-  background: rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.88);
   backdrop-filter: blur(18px);
 }
 
@@ -70,7 +75,7 @@
 
 .client-brand-text { line-height: 1.05; }
 .client-brand-title { font-weight: 950; letter-spacing: -0.03em; color: var(--nx-ink); }
-.client-brand-subtitle { color: var(--nx-muted); font-size: 12px; font-weight: 700; }
+.client-brand-subtitle { color: var(--nx-muted); font-size: 12px; font-weight: 800; margin-top: 4px; }
 
 .client-nav {
   display: flex;
@@ -79,19 +84,31 @@
   flex-wrap: wrap;
 }
 
-.client-nav a {
+.client-nav a,
+.client-nav button {
   color: #334155;
   text-decoration: none;
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 900;
   padding: 10px 13px;
   border-radius: 999px;
   transition: all .18s ease;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
 }
 
-.client-nav a:hover {
+.client-nav a:hover,
+.client-nav button:hover {
   background: #eaf2ff;
   color: var(--nx-blue-dark);
+}
+
+.client-nav .logout-button {
+  padding: 10px 18px;
+  border: 1px solid rgba(148, 163, 184, .28);
+  background: #ffffff;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, .08);
 }
 
 .client-mobile-nav {
@@ -125,7 +142,6 @@
 .client-mobile-nav span { font-size: 18px; line-height: 1; }
 .client-mobile-nav a:hover { background: #eaf2ff; color: var(--nx-blue-dark); }
 
-.client-portal .hero-card,
 .client-hero {
   position: relative;
   overflow: hidden;
@@ -138,7 +154,6 @@
   padding: 28px;
 }
 
-.client-portal .hero-card:before,
 .client-hero:before {
   content: "";
   position: absolute;
@@ -280,6 +295,6 @@
   .client-topbar { display: none; }
   .client-mobile-nav { display: grid; }
   .client-grid-4, .client-grid-3, .client-grid-2 { grid-template-columns: 1fr; }
-  .client-portal .hero-card, .client-hero, .client-portal .card { border-radius: 24px; padding: 18px; }
+  .client-hero, .client-portal .card { border-radius: 24px; padding: 18px; }
   .client-portal .page-title { font-size: clamp(1.8rem, 11vw, 2.5rem); }
 }
