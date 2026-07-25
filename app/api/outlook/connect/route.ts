@@ -1,40 +1,52 @@
 import { NextResponse } from 'next/server';
-import { requireSession, isPlatformAdmin } from '@/lib/auth';
+import { requireSession } from '@/lib/auth';
 import { prisma } from '@/lib/db';
 
+const OUTLOOK_SCOPES = 'offline_access User.Read Mail.Read';
+
 export async function GET(request: Request) {
-  const session = requireSession();
-  const company = await prisma.company.findUnique({
-    where: { id: session.companyId },
-    include: { outlook: true }
-  });
+  try {
+    const session = requireSession();
 
-  if (!company) return new NextResponse('Company not found', { status: 404 });
-  if (!company.isActive && !isPlatformAdmin(session)) return new NextResponse('Client account is inactive.', { status: 403 });
+    const rows = await prisma.$queryRawUnsafe<any[]>(
+      `SELECT
+        COALESCE("maxOutlookConnections", 1) AS "maxOutlookConnections",
+        COALESCE("allowClientReconnectEmail", TRUE) AS "allowClientReconnectEmail"
+       FROM "Company"
+       WHERE "id" = $1
+       LIMIT 1`,
+      session.companyId
+    );
 
-  const existingCount = company.outlook.length;
-  const canReconnect = company.allowClientEmailReconnect || existingCount === 0 || isPlatformAdmin(session);
+    const company = rows[0] || { maxOutlookConnections: 1, allowClientReconnectEmail: true };
+    const activeCount = await prisma.outlookConnection.count({ where: { companyId: session.companyId, isActive: true } });
+    const maxAllowed = Math.max(0, Number(company.maxOutlookConnections || 1));
+    const reconnectAllowed = Boolean(company.allowClientReconnectEmail);
 
-  if (!canReconnect) return new NextResponse('Outlook reconnect is disabled by admin.', { status: 403 });
-  if (existingCount >= company.maxOutlookConnections) return new NextResponse('Outlook connection limit reached. Ask admin to increase the limit.', { status: 403 });
+    if (activeCount > 0 && !reconnectAllowed) {
+      return new NextResponse('Outlook reconnect is disabled by admin.', { status: 403 });
+    }
 
-  const clientId = process.env.MICROSOFT_CLIENT_ID;
-  const redirectUri = process.env.MICROSOFT_REDIRECT_URI;
+    if (activeCount >= maxAllowed) {
+      return new NextResponse(`Outlook connection limit reached. Allowed: ${maxAllowed}.`, { status: 403 });
+    }
 
-  if (!clientId || !redirectUri) {
-    return new NextResponse('Set MICROSOFT_CLIENT_ID and MICROSOFT_REDIRECT_URI first', { status: 400 });
+    const clientId = process.env.MICROSOFT_CLIENT_ID || '';
+    const redirectUri = process.env.MICROSOFT_REDIRECT_URI || '';
+    if (!clientId || !redirectUri) return new NextResponse('Microsoft OAuth is not configured.', { status: 500 });
+
+    const state = Buffer.from(JSON.stringify({ companyId: session.companyId, userId: session.userId, ts: Date.now() })).toString('base64url');
+    const authUrl = new URL('https://login.microsoftonline.com/common/oauth2/v2.0/authorize');
+    authUrl.searchParams.set('client_id', clientId);
+    authUrl.searchParams.set('response_type', 'code');
+    authUrl.searchParams.set('redirect_uri', redirectUri);
+    authUrl.searchParams.set('response_mode', 'query');
+    authUrl.searchParams.set('scope', OUTLOOK_SCOPES);
+    authUrl.searchParams.set('prompt', 'select_account');
+    authUrl.searchParams.set('state', state);
+
+    return NextResponse.redirect(authUrl.toString());
+  } catch (error) {
+    return NextResponse.json({ message: error instanceof Error ? error.message : 'Could not start Outlook connection.' }, { status: 500 });
   }
-
-  const state = Buffer.from(JSON.stringify({ companyId: session.companyId, userId: session.userId, returnTo: new URL(request.url).origin })).toString('base64url');
-
-  const url = new URL('https://login.microsoftonline.com/common/oauth2/v2.0/authorize');
-  url.searchParams.set('client_id', clientId);
-  url.searchParams.set('response_type', 'code');
-  url.searchParams.set('redirect_uri', redirectUri);
-  url.searchParams.set('response_mode', 'query');
-  url.searchParams.set('scope', 'offline_access User.Read Mail.Read');
-  url.searchParams.set('state', state);
-  url.searchParams.set('prompt', 'select_account');
-
-  return NextResponse.redirect(url.toString());
 }

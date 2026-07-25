@@ -1,32 +1,56 @@
 import { NextResponse } from 'next/server';
-import { google } from 'googleapis';
-import { requireSession, isPlatformAdmin } from '@/lib/auth';
+import { requireSession } from '@/lib/auth';
 import { prisma } from '@/lib/db';
 
+const GMAIL_SCOPES = [
+  'https://www.googleapis.com/auth/gmail.readonly',
+  'https://www.googleapis.com/auth/userinfo.email'
+].join(' ');
+
 export async function GET(request: Request) {
-  const session = requireSession();
-  const company = await prisma.company.findUnique({ where: { id: session.companyId }, include: { gmail: true } });
-  if (!company) return new NextResponse('Company not found', { status: 404 });
-  if (!company.isActive && !isPlatformAdmin(session)) return new NextResponse('Client account is inactive.', { status: 403 });
+  try {
+    const session = requireSession();
 
-  const existingCount = company.gmail.length;
-  const canReconnect = company.allowClientEmailReconnect || existingCount === 0 || isPlatformAdmin(session);
-  if (!canReconnect) return new NextResponse('Gmail reconnect is disabled by admin.', { status: 403 });
-  if (existingCount >= company.maxGmailConnections) return new NextResponse('Gmail connection limit reached. Ask admin to increase the limit.', { status: 403 });
+    const rows = await prisma.$queryRawUnsafe<any[]>(
+      `SELECT
+        COALESCE("maxGmailConnections", 1) AS "maxGmailConnections",
+        COALESCE("allowClientReconnectEmail", TRUE) AS "allowClientReconnectEmail"
+       FROM "Company"
+       WHERE "id" = $1
+       LIMIT 1`,
+      session.companyId
+    );
 
-  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REDIRECT_URI) {
-    return new NextResponse('Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and GOOGLE_REDIRECT_URI first', { status: 400 });
+    const company = rows[0] || { maxGmailConnections: 1, allowClientReconnectEmail: true };
+    const activeCount = await prisma.gmailConnection.count({ where: { companyId: session.companyId, isActive: true } });
+    const maxAllowed = Math.max(0, Number(company.maxGmailConnections || 1));
+    const reconnectAllowed = Boolean(company.allowClientReconnectEmail);
+
+    if (activeCount > 0 && !reconnectAllowed) {
+      return new NextResponse('Gmail reconnect is disabled by admin.', { status: 403 });
+    }
+
+    if (activeCount >= maxAllowed) {
+      return new NextResponse(`Gmail connection limit reached. Allowed: ${maxAllowed}.`, { status: 403 });
+    }
+
+    const clientId = process.env.GOOGLE_CLIENT_ID || '';
+    const redirectUri = process.env.GOOGLE_REDIRECT_URI || '';
+    if (!clientId || !redirectUri) return new NextResponse('Google OAuth is not configured.', { status: 500 });
+
+    const state = Buffer.from(JSON.stringify({ companyId: session.companyId, userId: session.userId, ts: Date.now() })).toString('base64url');
+    const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+    authUrl.searchParams.set('client_id', clientId);
+    authUrl.searchParams.set('redirect_uri', redirectUri);
+    authUrl.searchParams.set('response_type', 'code');
+    authUrl.searchParams.set('scope', GMAIL_SCOPES);
+    authUrl.searchParams.set('access_type', 'offline');
+    authUrl.searchParams.set('prompt', 'consent');
+    authUrl.searchParams.set('include_granted_scopes', 'true');
+    authUrl.searchParams.set('state', state);
+
+    return NextResponse.redirect(authUrl.toString());
+  } catch (error) {
+    return NextResponse.json({ message: error instanceof Error ? error.message : 'Could not start Gmail connection.' }, { status: 500 });
   }
-
-  const oauth2 = new google.auth.OAuth2(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET, process.env.GOOGLE_REDIRECT_URI);
-  const state = Buffer.from(JSON.stringify({ companyId: session.companyId, userId: session.userId, returnTo: new URL(request.url).origin })).toString('base64url');
-
-  const authUrl = oauth2.generateAuthUrl({
-    access_type: 'offline',
-    prompt: 'consent select_account',
-    state,
-    scope: ['https://www.googleapis.com/auth/gmail.readonly', 'openid', 'email']
-  });
-
-  return NextResponse.redirect(authUrl);
 }
