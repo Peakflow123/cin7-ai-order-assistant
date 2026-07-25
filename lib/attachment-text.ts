@@ -1,3 +1,5 @@
+import { extractTextFromImageBuffer, isSupportedOcrImage } from '@/lib/ocr';
+
 function sanitizeText(value: string, max = 12000) {
   return value.replace(/\u0000/g, '').replace(/\s+\n/g, '\n').trim().slice(0, max);
 }
@@ -35,8 +37,9 @@ export async function parseAttachmentBuffer(filename: string, mimeType: string, 
       return sanitizeText(buffer.toString('utf8'), 9000);
     }
 
-    if (lowerMime.startsWith('image/') || ['.png', '.jpg', '.jpeg', '.webp'].some((ext) => lowerName.endsWith(ext))) {
-      return `[Image attachment found but OCR is not enabled yet: ${filename}]`;
+    if (isSupportedOcrImage(filename, mimeType)) {
+      const extracted = await extractTextFromImageBuffer({ filename, mimeType, buffer });
+      return sanitizeText(extracted, 9000);
     }
   } catch (error) {
     return `[Could not parse attachment ${filename}: ${error instanceof Error ? error.message : 'unknown error'}]`;
