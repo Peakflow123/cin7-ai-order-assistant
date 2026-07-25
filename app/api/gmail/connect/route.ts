@@ -7,7 +7,7 @@ const GMAIL_SCOPES = [
   'https://www.googleapis.com/auth/userinfo.email'
 ].join(' ');
 
-export async function GET(request: Request) {
+export async function GET() {
   try {
     const session = requireSession();
 
@@ -26,12 +26,13 @@ export async function GET(request: Request) {
     const maxAllowed = Math.max(0, Number(company.maxGmailConnections || 1));
     const reconnectAllowed = Boolean(company.allowClientReconnectEmail);
 
+    // Only currently active connections count against the limit.
     if (activeCount > 0 && !reconnectAllowed) {
       return new NextResponse('Gmail reconnect is disabled by admin.', { status: 403 });
     }
 
     if (activeCount >= maxAllowed) {
-      return new NextResponse(`Gmail connection limit reached. Allowed: ${maxAllowed}.`, { status: 403 });
+      return new NextResponse(`Gmail connection limit reached. Active connections: ${activeCount}. Allowed: ${maxAllowed}.`, { status: 403 });
     }
 
     const clientId = process.env.GOOGLE_CLIENT_ID || '';

@@ -4,7 +4,7 @@ import { prisma } from '@/lib/db';
 
 const OUTLOOK_SCOPES = 'offline_access User.Read Mail.Read';
 
-export async function GET(request: Request) {
+export async function GET() {
   try {
     const session = requireSession();
 
@@ -23,12 +23,13 @@ export async function GET(request: Request) {
     const maxAllowed = Math.max(0, Number(company.maxOutlookConnections || 1));
     const reconnectAllowed = Boolean(company.allowClientReconnectEmail);
 
+    // Only currently active connections count against the limit.
     if (activeCount > 0 && !reconnectAllowed) {
       return new NextResponse('Outlook reconnect is disabled by admin.', { status: 403 });
     }
 
     if (activeCount >= maxAllowed) {
-      return new NextResponse(`Outlook connection limit reached. Allowed: ${maxAllowed}.`, { status: 403 });
+      return new NextResponse(`Outlook connection limit reached. Active connections: ${activeCount}. Allowed: ${maxAllowed}.`, { status: 403 });
     }
 
     const clientId = process.env.MICROSOFT_CLIENT_ID || '';
