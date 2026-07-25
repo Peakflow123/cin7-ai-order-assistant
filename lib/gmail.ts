@@ -18,6 +18,12 @@ export type GmailMessageSummary = {
   classification: EmailOrderClassification;
 };
 
+type GmailListOptions = {
+  fromDate?: string | null;
+  toDate?: string | null;
+  classify?: boolean;
+};
+
 function decodeBase64Url(value?: string | null) {
   if (!value) return Buffer.from('');
   const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
@@ -32,6 +38,14 @@ function stripHtml(value: string) {
 
 function getHeader(headers: any[] | undefined, name: string) { return headers?.find((header) => String(header.name || '').toLowerCase() === name.toLowerCase())?.value || ''; }
 function sanitizeText(value: string, max = 12000) { return value.replace(/\u0000/g, '').replace(/\s+\n/g, '\n').trim().slice(0, max); }
+
+function gmailDateQuery(options?: GmailListOptions) {
+  const parts = ['-in:spam', '-in:trash'];
+  if (options?.fromDate) parts.push(`after:${String(options.fromDate).replace(/-/g, '/')}`);
+  if (options?.toDate) parts.push(`before:${String(options.toDate).replace(/-/g, '/')}`);
+  if (!options?.fromDate && !options?.toDate) parts.unshift('newer_than:14d');
+  return parts.join(' ');
+}
 
 async function parseAttachmentBuffer(filename: string, mimeType: string, buffer: Buffer) {
   const lowerName = filename.toLowerCase();
@@ -133,11 +147,19 @@ export async function getGmailMessageText(connectionId: string, companyId: strin
   return { connection, messageId: message.id || messageId, threadId: message.threadId || '', from, subject, date, bodyText: fullText, attachmentNames: collected.attachments.map((item) => item.filename) };
 }
 
-export async function listRecentGmailMessages(connectionId: string, companyId: string, maxResults = 5, onlyOrderRelated = true) {
+export async function listRecentGmailMessages(
+  connectionId: string,
+  companyId: string,
+  maxResults = 5,
+  onlyOrderRelated = true,
+  options: GmailListOptions = {}
+) {
   const { gmail } = await getGmailClient(connectionId, companyId);
-  const listResponse = await gmail.users.messages.list({ userId: 'me', maxResults, q: 'newer_than:14d -in:spam -in:trash' });
+  const listResponse = await gmail.users.messages.list({ userId: 'me', maxResults, q: gmailDateQuery(options) });
   const messages = listResponse.data.messages || [];
   const summaries: GmailMessageSummary[] = [];
+  const classify = Boolean(options.classify);
+
   for (const item of messages) {
     if (!item.id) continue;
     const response = await gmail.users.messages.get({ userId: 'me', id: item.id, format: 'metadata', metadataHeaders: ['From', 'Subject', 'Date'] });
@@ -149,8 +171,10 @@ export async function listRecentGmailMessages(connectionId: string, companyId: s
     const attachmentNames = collectMetadataAttachmentNames(message.payload);
     const sourceMessageId = `gmail:${connectionId}:${message.id}`;
     const existingOrder = await prisma.order.findFirst({ where: { companyId, sourceMessageId }, select: { id: true } });
-    const classification = await classifyEmailForOrder({ companyId, subject, from, snippet: message.snippet || '', attachmentNames });
-    if (onlyOrderRelated && classification.category === 'NOT_ORDER' && classification.confidence >= 0.7) continue;
+    const classification = classify
+      ? await classifyEmailForOrder({ companyId, subject, from, snippet: message.snippet || '', attachmentNames })
+      : { category: 'UNCLEAR' as const, confidence: 0, reason: 'AI classification not used on fast load.' };
+    if (classify && onlyOrderRelated && classification.category === 'NOT_ORDER' && classification.confidence >= 0.7) continue;
     summaries.push({ id: message.id || item.id, threadId: message.threadId || item.threadId || '', from, subject, date, snippet: message.snippet || '', hasAttachments: attachmentNames.length > 0, attachmentNames, alreadyProcessed: Boolean(existingOrder), orderId: existingOrder?.id || null, classification });
   }
   return summaries;
