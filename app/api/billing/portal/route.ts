@@ -13,8 +13,8 @@ export async function POST(request: Request) {
     `;
     const customer = rows[0]?.stripeCustomerId;
     if (!customer) throw new Error('No Stripe customer is linked to this company yet.');
-
     const baseUrl = process.env.APP_BASE_URL || process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin;
+
     const params = new URLSearchParams();
     params.set('customer', customer);
     params.set('return_url', `${baseUrl}/billing`);

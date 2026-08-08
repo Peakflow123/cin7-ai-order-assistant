@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import Link from 'next/link';
 import { getSession, isPlatformAdmin } from '@/lib/auth';
 import { prisma } from '@/lib/db';
 
@@ -37,9 +38,10 @@ export default async function AdminBillingPage() {
   return (
     <main className="page-shell space-y-6">
       <section className="hero-card">
-        <p className="section-label">Admin</p>
+        <Link href="/admin/launch" className="text-sm font-bold text-blue-700 hover:text-blue-900">Back to Control Center</Link>
+        <p className="section-label mt-4">Admin</p>
         <h1 className="page-title">Billing & Trials</h1>
-        <p className="page-subtitle">Control trial access, subscription status, plan and monthly order limits for each client.</p>
+        <p className="page-subtitle">Control subscription status, trials, plans and order limits for each client.</p>
       </section>
 
       <section className="grid gap-4">

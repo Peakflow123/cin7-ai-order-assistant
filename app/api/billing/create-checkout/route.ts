@@ -14,16 +14,12 @@ export async function POST(request: Request) {
     if (!priceId) throw new Error(`Stripe price is not configured for plan: ${plan}`);
     if (!process.env.STRIPE_SECRET_KEY) throw new Error('STRIPE_SECRET_KEY is missing.');
 
-    const companyRows = await prisma.$queryRaw<Array<{ id: string; name: string; stripeCustomerId: string | null }>>`
-      SELECT "id", "name", "stripeCustomerId"
-      FROM "Company"
-      WHERE "id" = ${session.companyId}
-      LIMIT 1
+    const rows = await prisma.$queryRaw<Array<{ id: string; name: string; stripeCustomerId: string | null }>>`
+      SELECT "id", "name", "stripeCustomerId" FROM "Company" WHERE "id" = ${session.companyId} LIMIT 1
     `;
-    const company = companyRows[0];
+    const company = rows[0];
     if (!company) throw new Error('Company not found.');
-
-    const user = await prisma.user.findUnique({ where: { id: session.userId }, select: { email: true, name: true } });
+    const user = await prisma.user.findUnique({ where: { id: session.userId }, select: { email: true } });
     const baseUrl = process.env.APP_BASE_URL || process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin;
 
     const params = new URLSearchParams();
@@ -61,7 +57,6 @@ export async function POST(request: Request) {
 
     return NextResponse.redirect(data.url, { status: 303 });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Could not start checkout.';
-    return NextResponse.json({ message }, { status: 500 });
+    return NextResponse.json({ message: error instanceof Error ? error.message : 'Could not start Stripe Checkout.' }, { status: 500 });
   }
 }

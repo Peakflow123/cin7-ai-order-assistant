@@ -33,7 +33,6 @@ export async function POST(request: Request) {
 
     return NextResponse.json(result);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown Gmail process error';
-    return NextResponse.json({ message }, { status: 500 });
+    return NextResponse.json({ message: error instanceof Error ? error.message : 'Unknown Gmail process error' }, { status: 500 });
   }
 }
