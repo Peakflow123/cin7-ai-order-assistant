@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
-import Link from 'next/link';
 import { getSession, isPlatformAdmin } from '@/lib/auth';
 import { prisma } from '@/lib/db';
+import AdminPortalShell from '../launch/AdminPortalShell';
 
 export default async function AdminBillingPage() {
   const session = getSession();
@@ -36,14 +36,7 @@ export default async function AdminBillingPage() {
   `;
 
   return (
-    <main className="page-shell space-y-6">
-      <section className="hero-card">
-        <Link href="/admin/launch" className="text-sm font-bold text-blue-700 hover:text-blue-900">Back to Control Center</Link>
-        <p className="section-label mt-4">Admin</p>
-        <h1 className="page-title">Billing & Trials</h1>
-        <p className="page-subtitle">Control subscription status, trials, plans and order limits for each client.</p>
-      </section>
-
+    <AdminPortalShell title="Billing & Trials" subtitle="Control trial access, subscription status, plans and monthly order limits for each client.">
       <section className="grid gap-4">
         {companies.map((company) => (
           <form key={company.id} action="/api/admin/billing/update" method="POST" className="card grid gap-4 lg:grid-cols-[1fr_160px_160px_160px_180px_auto] lg:items-end">
@@ -85,6 +78,6 @@ export default async function AdminBillingPage() {
           </form>
         ))}
       </section>
-    </main>
+    </AdminPortalShell>
   );
 }

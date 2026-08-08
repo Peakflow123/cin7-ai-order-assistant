@@ -1,48 +1,73 @@
-import Link from 'next/link';
+'use client';
 
-const navItems = [
-  { href: '/admin/launch', label: 'Overview', description: 'Command center' },
-  { href: '/admin/launch/clients', label: 'Clients & Controls', description: 'Client limits and permissions' },
-  { href: '/admin/launch/usage', label: 'Usage & Storage', description: 'Storage and volume' },
-  { href: '/admin/launch/activity', label: 'Activity', description: 'Admin action history' },
-  { href: '/admin/launch/errors', label: 'Errors', description: 'Failed orders' },
-  { href: '/admin/launch/backups', label: 'Backups', description: 'Recovery checklist' }
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import type { ReactNode } from 'react';
+
+type AdminPortalShellProps = {
+  children: ReactNode;
+  title?: string;
+  subtitle?: string;
+  [key: string]: any;
+};
+
+const adminNavigation = [
+  { label: 'Control Center', href: '/admin/launch' },
+  { label: 'Clients', href: '/admin/launch/clients' },
+  { label: 'Billing', href: '/admin/billing' },
+  { label: 'Usage & Storage', href: '/admin/launch/usage' },
+  { label: 'Activity', href: '/admin/launch/activity' },
+  { label: 'Errors', href: '/admin/launch/errors' },
+  { label: 'Backups', href: '/admin/launch/backups' }
 ];
 
-export default function AdminPortalShell({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
+function isActive(pathname: string, href: string) {
+  if (href === '/admin/launch') return pathname === '/admin/launch';
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+export default function AdminPortalShell({ children, title, subtitle }: AdminPortalShellProps) {
+  const pathname = usePathname();
+
   return (
-    <main className="min-h-screen bg-slate-100">
-      <div className="mx-auto flex max-w-[1500px] gap-6 px-4 py-6 lg:px-6">
-        <aside className="hidden w-80 shrink-0 lg:block">
-          <div className="sticky top-6 space-y-4 rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="rounded-[1.5rem] bg-gradient-to-br from-blue-700 via-cyan-600 to-emerald-500 p-5 text-white shadow-sm">
-              <p className="text-xs font-bold uppercase tracking-[0.25em] text-white/75">NexOrder AI</p>
-              <h1 className="mt-2 text-2xl font-black">Admin Control Center</h1>
-              <p className="mt-2 text-sm text-white/80">One complete portal for clients, limits, usage and monitoring.</p>
+    <main className="page-shell admin-portal-shell">
+      <section className="admin-portal-layout">
+        <aside className="admin-portal-sidebar">
+          <div className="admin-portal-brand">
+            <img src="/nexorder-logo.svg" alt="NexOrder AI" className="client-brand-logo" />
+            <div>
+              <p className="client-brand-title">NexOrder AI</p>
+              <p className="client-brand-subtitle">Admin Control Center</p>
             </div>
-            <nav className="space-y-2">
-              {navItems.map((item) => (
-                <Link key={item.href} href={item.href} className="block rounded-2xl border border-transparent px-4 py-3 transition hover:border-blue-100 hover:bg-blue-50">
-                  <div className="font-black text-slate-950">{item.label}</div>
-                  <div className="text-xs text-slate-500">{item.description}</div>
-                </Link>
-              ))}
-            </nav>
           </div>
+
+          <nav className="admin-portal-nav" aria-label="Admin control center navigation">
+            {adminNavigation.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={isActive(pathname, item.href) ? 'admin-portal-nav-link admin-portal-nav-link-active' : 'admin-portal-nav-link'}
+              >
+                {item.label}
+              </Link>
+            ))}
+          </nav>
+
+          <form action="/api/auth/logout" method="POST" className="mt-4">
+            <button className="client-logout-button w-full" type="submit">Logout</button>
+          </form>
         </aside>
 
-        <section className="min-w-0 flex-1 space-y-6">
-          <header className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
-            <p className="text-xs font-bold uppercase tracking-[0.25em] text-blue-700">Admin Portal</p>
-            <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-950 md:text-4xl">{title}</h1>
-            <p className="mt-2 max-w-4xl text-slate-600">{subtitle}</p>
-            <div className="mt-5 flex flex-wrap gap-2">
-              {navItems.map((item) => <Link key={item.href} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-bold text-slate-700 hover:bg-blue-50 hover:text-blue-700" href={item.href}>{item.label}</Link>)}
+        <section className="admin-portal-main">
+          {(title || subtitle) && (
+            <div className="hero-card mb-6">
+              {title && <h1 className="page-title">{title}</h1>}
+              {subtitle && <p className="page-subtitle">{subtitle}</p>}
             </div>
-          </header>
+          )}
           {children}
         </section>
-      </div>
+      </section>
     </main>
   );
 }
