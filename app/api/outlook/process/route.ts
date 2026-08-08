@@ -2,10 +2,13 @@ import { NextResponse } from 'next/server';
 import { requireSession } from '@/lib/auth';
 import { getOutlookMessageText } from '@/lib/outlook';
 import { processEmailIntoOrder } from '@/lib/email-order';
+import { assertCanProcessOrder } from '@/lib/billing';
 
 export async function POST(request: Request) {
   try {
     const session = requireSession();
+    await assertCanProcessOrder(session.companyId);
+
     const body = await request.json();
     const connectionId = body.connectionId;
     const messageId = body.messageId;
@@ -13,7 +16,7 @@ export async function POST(request: Request) {
     if (!connectionId || !messageId) return new NextResponse('connectionId and messageId are required', { status: 400 });
 
     const outlookMessage = await getOutlookMessageText(connectionId, session.companyId, messageId);
-    const sourceMessageId = `outlook:${connectionId}:${outlookMessage.conversationId || outlookMessage.messageId}`;
+    const sourceMessageId = `outlook:${connectionId}:${outlookMessage.messageId}`;
 
     const result = await processEmailIntoOrder({
       companyId: session.companyId,
