@@ -25,49 +25,44 @@ function isActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
+function BrandMark({ size = 'small' }: { size?: 'small' | 'large' }) {
+  const sizeClass = size === 'large' ? 'h-12 w-12 text-xl' : 'h-10 w-10 text-lg';
+  return (
+    <div className={`${sizeClass} flex shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 via-cyan-500 to-emerald-500 font-black text-white shadow-sm`}>
+      N
+    </div>
+  );
+}
+
 export default function ClientPortalFrame(props: ClientPortalFrameProps) {
   const pathname = usePathname();
   const companyName = props.companyName || props.company?.name || 'Client Workspace';
 
   return (
-    <div className="client-app-shell">
-      <header className="client-topbar">
-        <div className="client-brand-block">
-          <img src="/nexorder-logo.svg" alt="NexOrder AI" className="client-brand-logo" />
+    <div>
+      {/* Desktop already has the main top header from the app layout. Do not render a second desktop header here. */}
+      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur md:hidden">
+        <div className="flex items-center gap-3">
+          <BrandMark />
           <div className="min-w-0">
-            <p className="client-brand-title">NexOrder AI</p>
-            <p className="client-brand-subtitle truncate">{companyName}</p>
+            <p className="truncate text-base font-black leading-tight text-slate-950">NexOrder AI</p>
+            <p className="truncate text-xs font-bold text-slate-500">{companyName}</p>
           </div>
         </div>
-
-        <nav className="client-desktop-nav" aria-label="Client navigation">
-          {navigation.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={isActive(pathname, item.href) ? 'client-nav-link client-nav-link-active' : 'client-nav-link'}
-            >
-              {item.label}
-            </Link>
-          ))}
-          <form action="/api/auth/logout" method="POST">
-            <button className="client-logout-button" type="submit">Logout</button>
-          </form>
-        </nav>
       </header>
 
-      <div className="client-content-with-mobile-nav">
-        {props.children}
-      </div>
+      <div className="pb-24 md:pb-0">{props.children}</div>
 
-      <nav className="client-mobile-bottom-nav" aria-label="Mobile client navigation">
+      <nav className="fixed bottom-0 left-0 right-0 z-50 grid grid-cols-6 border-t border-slate-200 bg-white/95 px-1 py-2 shadow-[0_-8px_30px_rgba(15,23,42,0.12)] backdrop-blur md:hidden" aria-label="Mobile client navigation">
         {navigation.map((item) => (
           <Link
             key={item.href}
             href={item.href}
-            className={isActive(pathname, item.href) ? 'client-mobile-nav-item client-mobile-nav-item-active' : 'client-mobile-nav-item'}
+            className={isActive(pathname, item.href)
+              ? 'rounded-2xl bg-blue-50 px-1 py-2 text-center text-[10px] font-black leading-tight text-blue-700'
+              : 'rounded-2xl px-1 py-2 text-center text-[10px] font-bold leading-tight text-slate-500'}
           >
-            <span>{item.label}</span>
+            {item.label}
           </Link>
         ))}
       </nav>

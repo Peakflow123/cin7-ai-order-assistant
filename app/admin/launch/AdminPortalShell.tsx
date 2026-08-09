@@ -4,14 +4,13 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
 
-type AdminPortalShellProps = {
+type Props = {
   children: ReactNode;
   title?: string;
   subtitle?: string;
-  [key: string]: any;
 };
 
-const adminNavigation = [
+const nav = [
   { label: 'Control Center', href: '/admin/launch' },
   { label: 'Clients', href: '/admin/launch/clients' },
   { label: 'Billing', href: '/admin/billing' },
@@ -26,7 +25,15 @@ function isActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export default function AdminPortalShell({ children, title, subtitle }: AdminPortalShellProps) {
+function AdminBrandMark() {
+  return (
+    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 via-cyan-500 to-emerald-500 text-lg font-black text-white shadow-sm">
+      N
+    </div>
+  );
+}
+
+export default function AdminPortalShell({ children, title, subtitle }: Props) {
   const pathname = usePathname();
 
   return (
@@ -34,7 +41,7 @@ export default function AdminPortalShell({ children, title, subtitle }: AdminPor
       <div className="mx-auto grid max-w-7xl gap-6 lg:grid-cols-[280px_1fr]">
         <aside className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm lg:sticky lg:top-6 lg:self-start">
           <div className="flex items-center gap-3 border-b border-slate-100 pb-5">
-            <img src="/nexorder-logo.svg" alt="NexOrder AI" className="h-12 w-12 rounded-2xl object-contain shadow-sm" />
+            <AdminBrandMark />
             <div className="min-w-0">
               <p className="text-lg font-black leading-tight text-slate-950">NexOrder AI</p>
               <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Admin Control Center</p>
@@ -42,7 +49,7 @@ export default function AdminPortalShell({ children, title, subtitle }: AdminPor
           </div>
 
           <nav className="mt-5 grid gap-2" aria-label="Admin control center navigation">
-            {adminNavigation.map((item) => (
+            {nav.map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
@@ -56,9 +63,7 @@ export default function AdminPortalShell({ children, title, subtitle }: AdminPor
           </nav>
 
           <form action="/api/auth/logout" method="POST" className="mt-5 border-t border-slate-100 pt-5">
-            <button className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-700 transition hover:bg-slate-50" type="submit">
-              Logout
-            </button>
+            <button className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-700 transition hover:bg-slate-50" type="submit">Logout</button>
           </form>
         </aside>
 
