@@ -30,44 +30,48 @@ export default function AdminPortalShell({ children, title, subtitle }: AdminPor
   const pathname = usePathname();
 
   return (
-    <main className="page-shell admin-portal-shell">
-      <section className="admin-portal-layout">
-        <aside className="admin-portal-sidebar">
-          <div className="admin-portal-brand">
-            <img src="/nexorder-logo.svg" alt="NexOrder AI" className="client-brand-logo" />
-            <div>
-              <p className="client-brand-title">NexOrder AI</p>
-              <p className="client-brand-subtitle">Admin Control Center</p>
+    <main className="min-h-screen bg-slate-50 px-4 py-6 md:px-8">
+      <div className="mx-auto grid max-w-7xl gap-6 lg:grid-cols-[280px_1fr]">
+        <aside className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm lg:sticky lg:top-6 lg:self-start">
+          <div className="flex items-center gap-3 border-b border-slate-100 pb-5">
+            <img src="/nexorder-logo.svg" alt="NexOrder AI" className="h-12 w-12 rounded-2xl object-contain shadow-sm" />
+            <div className="min-w-0">
+              <p className="text-lg font-black leading-tight text-slate-950">NexOrder AI</p>
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Admin Control Center</p>
             </div>
           </div>
 
-          <nav className="admin-portal-nav" aria-label="Admin control center navigation">
+          <nav className="mt-5 grid gap-2" aria-label="Admin control center navigation">
             {adminNavigation.map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
-                className={isActive(pathname, item.href) ? 'admin-portal-nav-link admin-portal-nav-link-active' : 'admin-portal-nav-link'}
+                className={isActive(pathname, item.href)
+                  ? 'rounded-2xl bg-blue-600 px-4 py-3 text-sm font-black text-white shadow-sm'
+                  : 'rounded-2xl px-4 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-100 hover:text-slate-950'}
               >
                 {item.label}
               </Link>
             ))}
           </nav>
 
-          <form action="/api/auth/logout" method="POST" className="mt-4">
-            <button className="client-logout-button w-full" type="submit">Logout</button>
+          <form action="/api/auth/logout" method="POST" className="mt-5 border-t border-slate-100 pt-5">
+            <button className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-700 transition hover:bg-slate-50" type="submit">
+              Logout
+            </button>
           </form>
         </aside>
 
-        <section className="admin-portal-main">
+        <section className="min-w-0">
           {(title || subtitle) && (
-            <div className="hero-card mb-6">
-              {title && <h1 className="page-title">{title}</h1>}
-              {subtitle && <p className="page-subtitle">{subtitle}</p>}
-            </div>
+            <section className="mb-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
+              {title && <h1 className="text-3xl font-black tracking-tight text-slate-950 md:text-5xl">{title}</h1>}
+              {subtitle && <p className="mt-3 max-w-3xl text-base text-slate-600 md:text-lg">{subtitle}</p>}
+            </section>
           )}
           {children}
         </section>
-      </section>
+      </div>
     </main>
   );
 }

@@ -39,7 +39,7 @@ export default async function AdminBillingPage() {
     <AdminPortalShell title="Billing & Trials" subtitle="Control trial access, subscription status, plans and monthly order limits for each client.">
       <section className="grid gap-4">
         {companies.map((company) => (
-          <form key={company.id} action="/api/admin/billing/update" method="POST" className="card grid gap-4 lg:grid-cols-[1fr_160px_160px_160px_180px_auto] lg:items-end">
+          <form key={company.id} action="/api/admin/billing/update" method="POST" className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm lg:grid-cols-[1fr_160px_160px_160px_180px_auto] lg:items-end">
             <input type="hidden" name="companyId" value={company.id} />
             <div>
               <h2 className="text-xl font-black text-slate-950">{company.name}</h2>
@@ -47,8 +47,8 @@ export default async function AdminBillingPage() {
               <p className="mt-1 text-xs text-slate-400">Stripe customer: {company.stripeCustomerId || 'Not linked'} | Subscription: {company.stripeSubscriptionId || 'Not linked'}</p>
             </div>
             <label>
-              <span className="section-label">Status</span>
-              <select className="input mt-1" name="subscriptionStatus" defaultValue={company.subscriptionStatus}>
+              <span className="text-xs font-black uppercase tracking-wide text-slate-500">Status</span>
+              <select className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3" name="subscriptionStatus" defaultValue={company.subscriptionStatus}>
                 <option value="trialing">Trialing</option>
                 <option value="active">Active</option>
                 <option value="trial_expired">Trial Expired</option>
@@ -58,8 +58,8 @@ export default async function AdminBillingPage() {
               </select>
             </label>
             <label>
-              <span className="section-label">Plan</span>
-              <select className="input mt-1" name="planName" defaultValue={company.planName}>
+              <span className="text-xs font-black uppercase tracking-wide text-slate-500">Plan</span>
+              <select className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3" name="planName" defaultValue={company.planName}>
                 <option value="trial">Trial</option>
                 <option value="starter">Starter</option>
                 <option value="professional">Professional</option>
@@ -67,14 +67,14 @@ export default async function AdminBillingPage() {
               </select>
             </label>
             <label>
-              <span className="section-label">Monthly limit</span>
-              <input className="input mt-1" type="number" name="monthlyOrderLimit" defaultValue={company.monthlyOrderLimit} min="1" />
+              <span className="text-xs font-black uppercase tracking-wide text-slate-500">Monthly limit</span>
+              <input className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3" type="number" name="monthlyOrderLimit" defaultValue={company.monthlyOrderLimit} min="1" />
             </label>
             <label>
-              <span className="section-label">Trial ends</span>
-              <input className="input mt-1" type="date" name="trialEndsAt" defaultValue={company.trialEndsAt ? company.trialEndsAt.toISOString().slice(0, 10) : ''} />
+              <span className="text-xs font-black uppercase tracking-wide text-slate-500">Trial ends</span>
+              <input className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3" type="date" name="trialEndsAt" defaultValue={company.trialEndsAt ? company.trialEndsAt.toISOString().slice(0, 10) : ''} />
             </label>
-            <button className="btn" type="submit">Save</button>
+            <button className="rounded-2xl bg-blue-600 px-6 py-3 font-black text-white shadow-sm transition hover:bg-blue-700" type="submit">Save</button>
           </form>
         ))}
       </section>
