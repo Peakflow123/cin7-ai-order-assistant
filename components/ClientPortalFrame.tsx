@@ -1,4 +1,4 @@
-import Link from 'next/link';
+﻿import Link from 'next/link';
 import '@/app/client-portal.css';
 
 const desktopNav = [
@@ -6,15 +6,16 @@ const desktopNav = [
   { href: '/orders', label: 'Orders' },
   { href: '/mobile', label: 'Review Orders' },
   { href: '/email', label: 'Channels' },
+  { href: '/billing', label: 'Billing' },
   { href: '/settings', label: 'Settings' }
 ];
 
 const mobileNav = [
-  { href: '/dashboard', label: 'Dashboard', icon: '⌂' },
-  { href: '/orders', label: 'Orders', icon: '▦' },
-  { href: '/mobile', label: 'Review', icon: '✓' },
-  { href: '/email', label: 'Channels', icon: '✉' },
-  { href: '/settings', label: 'Settings', icon: '⚙' }
+  { href: '/dashboard', label: 'Dashboard', icon: 'âŚ‚' },
+  { href: '/orders', label: 'Orders', icon: 'â–¦' },
+  { href: '/mobile', label: 'Review', icon: 'âś“' },
+  { href: '/email', label: 'Channels', icon: 'âś‰' },
+  { href: '/settings', label: 'Settings', icon: 'âš™' }
 ];
 
 export default function ClientPortalFrame({ children, companyName }: { children: React.ReactNode; companyName?: string | null }) {

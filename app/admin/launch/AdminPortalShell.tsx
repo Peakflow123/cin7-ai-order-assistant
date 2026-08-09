@@ -1,8 +1,9 @@
-import Link from 'next/link';
+﻿import Link from 'next/link';
 
 const navItems = [
   { href: '/admin/launch', label: 'Overview', description: 'Command center' },
   { href: '/admin/launch/clients', label: 'Clients & Controls', description: 'Client limits and permissions' },
+  { label: 'Billing', href: '/admin/billing' },
   { href: '/admin/launch/usage', label: 'Usage & Storage', description: 'Storage and volume' },
   { href: '/admin/launch/activity', label: 'Activity', description: 'Admin action history' },
   { href: '/admin/launch/errors', label: 'Errors', description: 'Failed orders' },
