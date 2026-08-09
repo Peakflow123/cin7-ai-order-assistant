@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { prisma } from '@/lib/db';
-import { stripePriceEnvForPlan, limitForPlan } from '@/lib/billing';
+import { stripePriceEnvForPlan } from '@/lib/billing';
 
 export async function POST(request: Request) {
   try {
@@ -11,14 +11,20 @@ export async function POST(request: Request) {
     const formData = await request.formData();
     const plan = String(formData.get('plan') || '').toLowerCase();
     const priceId = stripePriceEnvForPlan(plan);
+
     if (!priceId) throw new Error(`Stripe price is not configured for plan: ${plan}`);
     if (!process.env.STRIPE_SECRET_KEY) throw new Error('STRIPE_SECRET_KEY is missing.');
 
-    const rows = await prisma.$queryRaw<Array<{ id: string; name: string; stripeCustomerId: string | null }>>`
-      SELECT "id", "name", "stripeCustomerId" FROM "Company" WHERE "id" = ${session.companyId} LIMIT 1
+    const companyRows = await prisma.$queryRaw<Array<{ id: string; name: string; stripeCustomerId: string | null }>>`
+      SELECT "id", "name", "stripeCustomerId"
+      FROM "Company"
+      WHERE "id" = ${session.companyId}
+      LIMIT 1
     `;
-    const company = rows[0];
+
+    const company = companyRows[0];
     if (!company) throw new Error('Company not found.');
+
     const user = await prisma.user.findUnique({ where: { id: session.userId }, select: { email: true } });
     const baseUrl = process.env.APP_BASE_URL || process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin;
 
@@ -34,6 +40,7 @@ export async function POST(request: Request) {
     params.set('subscription_data[metadata][companyId]', company.id);
     params.set('subscription_data[metadata][plan]', plan);
     params.set('allow_promotion_codes', 'true');
+
     if (company.stripeCustomerId) params.set('customer', company.stripeCustomerId);
     else if (user?.email) params.set('customer_email', user.email);
 
@@ -49,12 +56,10 @@ export async function POST(request: Request) {
     const data = await response.json();
     if (!response.ok) throw new Error(`Stripe Checkout error: ${JSON.stringify(data)}`);
 
-    await prisma.$executeRaw`
-      UPDATE "Company"
-      SET "planName" = ${plan}, "monthlyOrderLimit" = ${limitForPlan(plan)}
-      WHERE "id" = ${company.id}
-    `;
-
+    // IMPORTANT:
+    // Do not update Company plan/status here. The user has only opened Stripe Checkout.
+    // Company subscription data must be updated only after Stripe confirms payment/subscription
+    // through /api/stripe/webhook, especially checkout.session.completed and subscription events.
     return NextResponse.redirect(data.url, { status: 303 });
   } catch (error) {
     return NextResponse.json({ message: error instanceof Error ? error.message : 'Could not start Stripe Checkout.' }, { status: 500 });
