@@ -42,9 +42,11 @@ async function Header() {
           {session && !admin && <Link className="nav-link" href="/mobile">Review</Link>}
           {session && !admin && <Link className="nav-link" href="/orders">Orders</Link>}
           {session && !admin && <Link className="nav-link" href="/email">Channels</Link>}
+          {session && !admin && <Link className="nav-link" href="/billing">Billing</Link>}
           {session && !admin && <Link className="nav-link" href="/settings">Cin7</Link>}
           {admin && <Link className="nav-link" href="/admin">Admin Dashboard</Link>}
           {admin && <Link className="nav-link" href="/admin/clients">Clients</Link>}
+          {admin && <Link className="nav-link" href="/admin/billing">Billing</Link>}
           {session ? <form action="/api/auth/logout" method="post"><button className="btn-secondary py-2" type="submit">Logout</button></form> : <Link className="btn py-2" href="/login">Login</Link>}
         </nav>
 
