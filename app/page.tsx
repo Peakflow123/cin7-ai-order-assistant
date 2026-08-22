@@ -8,6 +8,19 @@ export default function HomePage() {
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,#dbeafe,transparent_32%),linear-gradient(135deg,#f8fafc,#eef2ff_48%,#ecfeff)] text-slate-950">
+      <header className="border-b border-slate-200 bg-white/80 backdrop-blur">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
+          <div className="flex items-center gap-3">
+            <span className="grid h-11 w-11 place-items-center rounded-2xl bg-gradient-to-br from-blue-600 via-cyan-600 to-emerald-500 text-lg font-black text-white shadow-lg shadow-blue-500/20">N</span>
+            <span>
+              <span className="block text-lg font-black leading-tight">NexOrder AI</span>
+              <span className="block text-sm text-slate-500">AI order automation for Cin7 Core</span>
+            </span>
+          </div>
+          <Link className="rounded-xl bg-blue-600 px-5 py-2.5 font-bold text-white shadow-md shadow-blue-500/20 transition hover:bg-blue-700" href="/login">Login</Link>
+        </div>
+      </header>
+
       <section className="mx-auto grid max-w-7xl gap-12 px-6 py-14 lg:grid-cols-[1.05fr_0.95fr] lg:items-center lg:py-24">
         <div>
           <span className="inline-flex rounded-full border border-blue-200 bg-white/80 px-4 py-2 text-sm font-bold text-blue-700 shadow-sm">Built for businesses using Cin7 Core</span>
