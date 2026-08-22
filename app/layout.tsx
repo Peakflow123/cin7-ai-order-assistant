@@ -1,4 +1,5 @@
 import './globals.css';
+import './client-portal.css';
 import Link from 'next/link';
 import type { Metadata, Viewport } from 'next';
 import { getSession, isPlatformAdmin } from '@/lib/auth';
