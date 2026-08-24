@@ -1,0 +1,30 @@
+[33m5207cedd[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m Correct billing navigation and admin layout
+[33m3c43467b[m Add billing links to client and admin navigation
+[33m4545f91b[m Add commercial trial billing and landing page
+[33mb969f3b8[m Add billing trial Stripe and landing page
+[33m0eff3ead[m Update Groq OCR vision model
+[33m210875f5[m Fix active email connection limit handling
+[33mae6de9be[m Fix Gmail inbox list function signature
+[33mfed1de99[m Improve connection removal UX and add image OCR
+[33m384fc0fa[m Fix email reconnect limits and add remove connection
+[33m1bb1c65e[m Consolidate admin controls into launch control center
+[33m5e5ae298[m Polish mobile date fields and app icon
+[33macf09bb3[m Fix mobile client navigation and app icon
+[33m3cb28673[m Fix duplicate client header and review orders labels
+[33m4507c3c3[m Fix client header dashboard filters and email inbox labels
+[33m89304a0e[m Polish client portal navigation and dashboard UI
+[33m1f45e273[m Improve admin launch portal navigation
+[33mb3af9850[m Add safe launch readiness admin tools
+[33m7a51c44b[m[33m ([m[1;33mtag: [m[1;33mstable-admin-recovered-working[m[33m)[m Remove include all emails checkbox
+[33mce44d9ad[m Speed up Gmail and Outlook inbox loading
+[33m343ce519[m Add email filters duplicate prevention review feedback and product search
+[33m5955f257[m[33m ([m[1;33mtag: [m[1;33mstable-gmail-cin7-working-v2[m[33m)[m Update gitignore to exclude local build files
+[33mf646402b[m[33m ([m[1;33mtag: [m[1;33mstable-gmail-cin7-working[m[33m)[m Restore working Gmail and Outlook process routes
+[33m5c1f8836[m Fix email recent routes connection status select
+[33mc4cb3596[m Fix email route build imports
+[33mc2eae433[m Add email range duplicate prevention review feedback and search
+[33m83ef1de1[m Reduce Cin7 refresh batch size to avoid timeout
+[33me3229664[m Reset Cin7 sync to clean page by page flow
+[33m7b37f320[m Fix Cin7 refresh TypeScript null handling
+[33md6da924f[m Fix Cin7 refresh with page by page manual sync
+[33m49a8f02a[m Simplify Cin7 Core connection and manual refresh
