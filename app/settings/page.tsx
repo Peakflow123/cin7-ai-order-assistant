@@ -5,6 +5,7 @@ import { prisma } from '@/lib/db';
 import { decrypt } from '@/lib/crypto';
 import SessionTimeoutClient from './SessionTimeoutClient';
 import Cin7ConnectionSection from './Cin7ConnectionSection';
+import InstallAppCard from '@/components/InstallAppCard';
 
 function safeDecrypt(value?: string | null) {
   if (!value) return '';
@@ -47,6 +48,8 @@ export default async function SettingsPage() {
         lastProductsSync={syncState?.productsLastSyncedAt?.toISOString() || null}
         lastCustomersSync={syncState?.customersLastSyncedAt?.toISOString() || null}
       />
+
+      <InstallAppCard />
     </main>
   );
 }

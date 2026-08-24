@@ -48,9 +48,18 @@ function SimpleHeader({ admin, session, companyName }: { admin: boolean; session
 async function Shell({ children }: { children: React.ReactNode }) {
   const session = getSession();
   const admin = isPlatformAdmin(session);
-  const company = session?.companyId ? await prisma.company.findUnique({ where: { id: session.companyId }, select: { name: true } }) : null;
 
-  // Client workspace -> sidebar shell
+  let companyName: string | null = null;
+  let cin7Connected = false;
+  if (session?.companyId && !admin) {
+    const [company, cin7] = await Promise.all([
+      prisma.company.findUnique({ where: { id: session.companyId }, select: { name: true } }),
+      prisma.cin7Connection.findUnique({ where: { companyId: session.companyId }, select: { id: true } }).catch(() => null)
+    ]);
+    companyName = company?.name || null;
+    cin7Connected = Boolean(cin7);
+  }
+
   if (session && !admin) {
     return (
       <div className="nx-app">
@@ -65,13 +74,16 @@ async function Shell({ children }: { children: React.ReactNode }) {
 
           <div className="nx-workspace">
             <span className="nx-workspace-label">Workspace</span>
-            {company?.name || 'Client'}
+            {companyName || 'Client'}
           </div>
 
           <SidebarNavClient />
 
           <div className="nx-sidebar-foot">
-            <div className="nx-status"><span className="nx-status-dot" /> Cin7 connected</div>
+            <div className="nx-status" style={cin7Connected ? undefined : { color: '#94A3B8' }}>
+              <span className="nx-status-dot" style={cin7Connected ? undefined : { background: '#94A3B8' }} />
+              {cin7Connected ? 'Cin7 connected' : 'Cin7 not connected'}
+            </div>
             <form action="/api/auth/logout" method="post" className="nx-logout">
               <button type="submit">Logout</button>
             </form>
@@ -83,7 +95,7 @@ async function Shell({ children }: { children: React.ReactNode }) {
             <div className="nx-brand-mark">N</div>
             <div>
               <div className="nx-mobile-title">NexOrder AI</div>
-              <div className="nx-mobile-sub">{company?.name || 'Order Automation'}</div>
+              <div className="nx-mobile-sub">{companyName || 'Order Automation'}</div>
             </div>
           </header>
           {children}
@@ -94,10 +106,9 @@ async function Shell({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // Admin + logged-out -> simple top header
   return (
     <div className="min-h-screen">
-      <SimpleHeader admin={admin} session={session} companyName={company?.name} />
+      <SimpleHeader admin={admin} session={session} companyName={companyName} />
       {children}
     </div>
   );
