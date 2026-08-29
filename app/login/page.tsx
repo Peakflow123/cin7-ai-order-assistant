@@ -39,6 +39,10 @@ export default function LoginPage({ searchParams }: { searchParams?: { error?: s
             />
           </label>
 
+          <div className="flex justify-end">
+            <Link href="/forgot-password" className="text-sm font-bold text-blue-700 hover:text-blue-900">Forgot password?</Link>
+          </div>
+
           <button className="btn w-full" type="submit">Login</button>
         </form>
 
