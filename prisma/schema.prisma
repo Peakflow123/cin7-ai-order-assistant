@@ -223,6 +223,12 @@ model Order {
   sourceConnectionId String?
   sourceAccount      String?
   sourceMessageId    String?
+  internetMessageId  String?
+  threadId           String?
+  normalizedPo       String?
+  contentHash        String?
+  possibleDuplicate  Boolean     @default(false)
+  duplicateReason    String?
   sender             String?
   subject            String?
   originalText       String
@@ -241,6 +247,9 @@ model Order {
   @@index([companyId, source])
   @@index([companyId, sourceConnectionId])
   @@index([companyId, sourceMessageId])
+  @@index([companyId, internetMessageId])
+  @@index([companyId, threadId])
+  @@index([companyId, normalizedPo])
 }
 
 model OrderLine {

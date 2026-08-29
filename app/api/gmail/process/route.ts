@@ -2,13 +2,10 @@ import { NextResponse } from 'next/server';
 import { requireSession } from '@/lib/auth';
 import { getGmailMessageText } from '@/lib/gmail';
 import { processEmailIntoOrder } from '@/lib/email-order';
-import { assertCanProcessOrder } from '@/lib/billing';
 
 export async function POST(request: Request) {
   try {
     const session = requireSession();
-    await assertCanProcessOrder(session.companyId);
-
     const body = await request.json();
     const connectionId = body.connectionId;
     const messageId = body.messageId;
@@ -25,6 +22,8 @@ export async function POST(request: Request) {
       sourceConnectionId: connectionId,
       sourceAccount: gmailMessage.connection.email || null,
       sourceMessageId,
+      internetMessageId: gmailMessage.internetMessageId || null,
+      threadId: gmailMessage.threadId || null,
       sender: gmailMessage.from,
       subject: gmailMessage.subject,
       bodyText: gmailMessage.bodyText,
@@ -33,6 +32,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json(result);
   } catch (error) {
-    return NextResponse.json({ message: error instanceof Error ? error.message : 'Unknown Gmail process error' }, { status: 500 });
+    const message = error instanceof Error ? error.message : 'Unknown Gmail process error';
+    return NextResponse.json({ message }, { status: 500 });
   }
 }

@@ -12,10 +12,20 @@ export type ExtractedOrder = {
   lines: ExtractedOrderLine[];
 };
 
+export type EmailOrderType =
+  | 'customer_order'
+  | 'supplier_po'
+  | 'invoice'
+  | 'shipping'
+  | 'marketing'
+  | 'quote'
+  | 'other';
+
 export type EmailOrderClassification = {
   category: 'ORDER' | 'NOT_ORDER' | 'UNCLEAR';
   confidence: number;
   reason: string;
+  type?: EmailOrderType;
 };
 
 function normalize(value: string | null | undefined) {
@@ -107,20 +117,38 @@ export async function classifyEmailForOrder(input: {
   const falsePositiveExamples = await getClientFalsePositiveExamples(input.companyId);
 
   const prompt = `
-Classify this B2B email for an order processing system.
-Return ONLY valid JSON. No markdown.
+You are the email triage engine for a B2B sales-order automation system that creates CUSTOMER SALES ORDERS in an inventory system (Cin7 Core).
+Read the email and decide what it is. Return ONLY valid JSON. No markdown.
 
-Categories:
-- ORDER: customer is placing or confirming a purchase/sales order, or attachment name likely contains a PO/order.
-- NOT_ORDER: newsletter, invoice only, payment reminder, shipping notice, marketing, support discussion, spam, quote request with no confirmed purchase, vendor purchase order not from a customer, or unrelated email.
-- UNCLEAR: not enough information but could be an order.
+You must set BOTH a "category" and a precise "type".
 
-Only use feedback examples from this same client/company. Previous NOT_ORDER feedback for this client:
+type values (choose exactly one):
+- "customer_order": a CUSTOMER is placing or confirming a purchase from THIS business (this is what we want).
+- "supplier_po": a purchase order that THIS business is sending to a supplier, or a supplier confirming our purchase. NOT a customer order.
+- "invoice": an invoice, receipt, statement, or payment reminder.
+- "shipping": shipping, delivery, tracking, or dispatch notification.
+- "marketing": newsletter, promotion, campaign, or advertising.
+- "quote": a request for pricing/quote where no firm order is placed yet.
+- "other": anything else (internal mail, out-of-office, spam, support chat, unrelated).
+
+category rules (derive from type):
+- category = "ORDER" ONLY if type = "customer_order".
+- category = "NOT_ORDER" if type is supplier_po, invoice, shipping, marketing, or other.
+- category = "UNCLEAR" if type = "quote" OR if it could be a customer order but there is not enough information.
+
+Extra guidance:
+- A customer_order usually asks to buy/ship specific products/quantities, references a PO, or attaches a purchase order document.
+- Do not treat pricing/quote requests as ORDER. They are "quote" -> UNCLEAR.
+- Supplier POs (we are buying) are NOT customer orders. They are "supplier_po" -> NOT_ORDER.
+- Use attachment names as a hint (e.g., "PO12345.pdf", "order.xlsx" suggest an order document).
+
+Only use feedback examples from THIS same client/company. Previous NOT_ORDER feedback for this client:
 ${falsePositiveExamples || 'No feedback examples yet.'}
 
 Required JSON:
 {
   "category": "ORDER | NOT_ORDER | UNCLEAR",
+  "type": "customer_order | supplier_po | invoice | shipping | marketing | quote | other",
   "confidence": 0.0,
   "reason": "short reason"
 }
@@ -132,14 +160,23 @@ Attachment names: ${attachmentNames}
 `;
 
   const parsed = await callGroqJson(prompt, {
-    model: process.env.GROQ_CLASSIFIER_MODEL || 'llama-3.1-8b-instant',
-    maxTokens: 220
+    model: process.env.GROQ_CLASSIFIER_MODEL || 'openai/gpt-oss-20b',
+    maxTokens: 260
   });
 
-  const category = ['ORDER', 'NOT_ORDER', 'UNCLEAR'].includes(parsed.category) ? parsed.category : 'UNCLEAR';
+  const validTypes: EmailOrderType[] = ['customer_order', 'supplier_po', 'invoice', 'shipping', 'marketing', 'quote', 'other'];
+  const type = validTypes.includes(parsed.type) ? (parsed.type as EmailOrderType) : undefined;
+
+  let category = ['ORDER', 'NOT_ORDER', 'UNCLEAR'].includes(parsed.category) ? parsed.category : 'UNCLEAR';
+  // Enforce consistency between type and category so junk never becomes an order.
+  if (type === 'customer_order') category = 'ORDER';
+  else if (type === 'quote') category = 'UNCLEAR';
+  else if (type && type !== 'other') category = 'NOT_ORDER';
+
   const confidence = Number(parsed.confidence || 0);
   return {
     category,
+    type,
     confidence: Number.isFinite(confidence) ? confidence : 0,
     reason: parsed.reason || 'No reason provided'
   };

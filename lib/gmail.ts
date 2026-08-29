@@ -134,6 +134,7 @@ export async function getGmailMessageText(connectionId: string, companyId: strin
   const from = getHeader(headers, 'From');
   const subject = getHeader(headers, 'Subject') || '(No subject)';
   const date = getHeader(headers, 'Date');
+  const internetMessageId = getHeader(headers, 'Message-ID') || getHeader(headers, 'Message-Id') || '';
   const collected = collectFullParts(message.payload);
   const attachmentTexts: string[] = [];
   for (const attachment of collected.attachments.slice(0, 5)) {
@@ -144,7 +145,7 @@ export async function getGmailMessageText(connectionId: string, companyId: strin
   }
   const bodyText = sanitizeText(collected.text || message.snippet || '', 9000);
   const fullText = [bodyText, ...attachmentTexts].filter(Boolean).join('\n\n---\n\n').slice(0, 16000);
-  return { connection, messageId: message.id || messageId, threadId: message.threadId || '', from, subject, date, bodyText: fullText, attachmentNames: collected.attachments.map((item) => item.filename) };
+  return { connection, messageId: message.id || messageId, threadId: message.threadId || '', internetMessageId, from, subject, date, bodyText: fullText, attachmentNames: collected.attachments.map((item) => item.filename) };
 }
 
 export async function listRecentGmailMessages(
