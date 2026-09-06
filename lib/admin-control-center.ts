@@ -43,6 +43,7 @@ export async function getAdminClients() {
       COALESCE(c."maxOutlookConnections", 1) AS "maxOutlookConnections",
       COALESCE(c."allowClientEditCin7Settings", FALSE) AS "allowClientEditCin7Settings",
       COALESCE(c."allowClientReconnectEmail", TRUE) AS "allowClientReconnectEmail",
+      COALESCE(c."allowAiClassificationOnLoad", FALSE) AS "allowAiClassificationOnLoad",
       COALESCE(c."autoCreateEnabled", FALSE) AS "autoCreateEnabled",
       COALESCE(c."autoCreateThreshold", 0.95) AS "autoCreateThreshold",
       c."adminNotes",
@@ -63,12 +64,6 @@ export async function getAdminClients() {
 }
 
 export function estimateStorageMb(row: any) {
-  const bytes =
-    Number(row.products || 0) * 1500 +
-    Number(row.customers || 0) * 1300 +
-    Number(row.orders || 0) * 2500 +
-    Number(row.feedbackCount || 0) * 900 +
-    Number(row.gmailConnections || 0) * 2000 +
-    Number(row.outlookConnections || 0) * 2000;
+  const bytes = Number(row.products || 0) * 1500 + Number(row.customers || 0) * 1300 + Number(row.orders || 0) * 2500 + Number(row.feedbackCount || 0) * 900 + Number(row.gmailConnections || 0) * 2000 + Number(row.outlookConnections || 0) * 2000;
   return Math.round((bytes / 1024 / 1024) * 100) / 100;
 }

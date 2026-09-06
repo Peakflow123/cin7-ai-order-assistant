@@ -1,75 +1,12 @@
 'use client';
-
 import { useState } from 'react';
-
 type GmailConnection = { id: string; email: string | null; isActive: boolean };
-type GmailMessage = {
-  id: string;
-  from: string;
-  subject: string;
-  date: string;
-  snippet: string;
-  hasAttachments: boolean;
-  attachmentNames: string[];
-  alreadyProcessed: boolean;
-  orderId: string | null;
-  classification: { category: 'ORDER' | 'NOT_ORDER' | 'UNCLEAR'; confidence: number; reason: string };
-};
-
-function badgeClass(category: string) {
-  if (category === 'ORDER') return 'badge badge-green';
-  if (category === 'NOT_ORDER') return 'badge badge-gray';
-  return 'badge badge-yellow';
-}
-
-export default function GmailInboxClient({ connections }: { connections: GmailConnection[] }) {
-  const [selectedConnectionId, setSelectedConnectionId] = useState(connections[0]?.id || '');
-  const [messages, setMessages] = useState<GmailMessage[]>([]);
-  const [status, setStatus] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [processingId, setProcessingId] = useState<string | null>(null);
-  const [limit, setLimit] = useState(50);
-  const [fromDate, setFromDate] = useState('');
-  const [toDate, setToDate] = useState('');
-  const [classifyOnLoad, setClassifyOnLoad] = useState(false);
-
-  async function loadInbox() {
-    if (!selectedConnectionId) return;
-    setLoading(true);
-    setStatus(classifyOnLoad ? 'Loading Gmail messages with AI classification...' : 'Loading Gmail messages...');
-    const params = new URLSearchParams({ connectionId: selectedConnectionId, maxResults: String(limit), classify: String(classifyOnLoad) });
-    if (fromDate) params.set('fromDate', fromDate);
-    if (toDate) params.set('toDate', toDate);
-    const response = await fetch(`/api/gmail/inbox?${params.toString()}`);
-    const data = await response.json();
-    if (!response.ok) { setStatus(data.message || 'Could not load Gmail inbox.'); setLoading(false); return; }
-    setMessages(data.messages || []);
-    setStatus(`Loaded ${(data.messages || []).length} Gmail emails.`);
-    setLoading(false);
-  }
-
-  async function processMessage(messageId: string, force = false) {
-    setProcessingId(messageId);
-    setStatus('Processing full email and supported attachments with AI...');
-    const response = await fetch('/api/gmail/process', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ connectionId: selectedConnectionId, messageId, force }) });
-    const data = await response.json();
-    setProcessingId(null);
-    if (!response.ok) { setStatus(data.message || 'Could not process Gmail message.'); return; }
-    if (data.orderId) { window.location.href = `/orders/${data.orderId}`; return; }
-    setStatus(data.message || 'Gmail message processed.');
-  }
-
-  if (connections.length === 0) return null;
-
-  return (
-    <section className="card space-y-4">
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div><h2 className="text-xl font-black">Gmail Order Inbox</h2><p className="text-sm text-slate-500">Load recent Gmail emails and process selected customer orders.</p></div>
-        <div className="flex flex-col gap-2 md:flex-row"><select className="input md:w-80" value={selectedConnectionId} onChange={(event) => setSelectedConnectionId(event.target.value)}>{connections.map((connection) => <option key={connection.id} value={connection.id}>{connection.email || 'Connected Gmail mailbox'}</option>)}</select><button className="btn" disabled={loading || !selectedConnectionId} onClick={loadInbox}>{loading ? 'Loading...' : 'Load Gmail Emails'}</button></div>
-      </div>
-      <div className="grid gap-3 md:grid-cols-4"><label><span className="section-label">Load</span><select className="input mt-1" value={limit} onChange={(event) => setLimit(Number(event.target.value))}><option value={25}>Last 25 emails</option><option value={50}>Last 50 emails</option><option value={100}>Last 100 emails</option></select></label><label><span className="section-label">From date</span><input className="input mt-1" type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} /></label><label><span className="section-label">To date</span><input className="input mt-1" type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} /></label><label className="flex items-end gap-2 text-sm text-slate-600"><input type="checkbox" checked={classifyOnLoad} onChange={(event) => setClassifyOnLoad(event.target.checked)} /> Use AI classification on load</label></div>
-      {status && <p className="rounded-2xl bg-slate-50 p-3 text-sm text-slate-700">{status}</p>}
-      <div className="space-y-3">{messages.map((message) => <div key={message.id} className="rounded-2xl border border-slate-200 bg-white p-4"><div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between"><div className="min-w-0"><div className="mb-2 flex flex-wrap items-center gap-2"><span className={badgeClass(message.classification.category)}>{message.classification.category}</span><span className="badge badge-gray">{Math.round(message.classification.confidence * 100)}%</span>{message.alreadyProcessed && <span className="badge badge-green">Processed</span>}</div><p className="font-semibold text-slate-950">{message.subject}</p><p className="text-sm text-slate-500">From: {message.from}</p><p className="text-sm text-slate-500">Date: {message.date}</p><p className="mt-2 text-sm text-slate-700">{message.snippet}</p>{message.classification.reason && <p className="mt-2 text-xs text-slate-500">AI reason: {message.classification.reason}</p>}{message.hasAttachments && <p className="mt-2 text-xs text-slate-500">Attachments: {message.attachmentNames.join(', ')}</p>}</div><div className="flex shrink-0 flex-col gap-2"><button className="btn-secondary" disabled={processingId === message.id || message.alreadyProcessed || message.classification.category === 'NOT_ORDER'} onClick={() => processMessage(message.id)}>{message.alreadyProcessed ? 'Processed' : processingId === message.id ? 'Processing...' : 'Process Email'}</button>{message.classification.category === 'NOT_ORDER' && !message.alreadyProcessed && <button className="btn-secondary" disabled={processingId === message.id} onClick={() => processMessage(message.id, true)}>Process Anyway</button>}</div></div></div>)}</div>
-    </section>
-  );
+type GmailMessage = { id: string; from: string; subject: string; date: string; snippet: string; hasAttachments: boolean; attachmentNames: string[]; alreadyProcessed: boolean; orderId: string | null; classification: { category: 'ORDER' | 'NOT_ORDER' | 'UNCLEAR'; confidence: number; reason: string } };
+function badgeClass(category: string) { if (category === 'ORDER') return 'badge badge-green'; if (category === 'NOT_ORDER') return 'badge badge-gray'; return 'badge badge-yellow'; }
+export default function GmailInboxClient({ connections, allowAiClassificationOnLoad }: { connections: GmailConnection[]; allowAiClassificationOnLoad: boolean }) {
+ const [selectedConnectionId,setSelectedConnectionId]=useState(connections[0]?.id||''); const [messages,setMessages]=useState<GmailMessage[]>([]); const [status,setStatus]=useState(''); const [loading,setLoading]=useState(false); const [processingId,setProcessingId]=useState<string|null>(null); const [limit,setLimit]=useState(50); const [fromDate,setFromDate]=useState(''); const [toDate,setToDate]=useState(''); const [classifyOnLoad,setClassifyOnLoad]=useState(false);
+ async function loadInbox() { if(!selectedConnectionId)return; setLoading(true); const shouldClassify=allowAiClassificationOnLoad&&classifyOnLoad; setStatus(shouldClassify?'Loading Gmail messages with AI classification...':'Loading Gmail messages...'); const params=new URLSearchParams({connectionId:selectedConnectionId,maxResults:String(limit),classify:String(shouldClassify)}); if(fromDate)params.set('fromDate',fromDate); if(toDate)params.set('toDate',toDate); const response=await fetch(`/api/gmail/inbox?${params.toString()}`); const data=await response.json(); if(!response.ok){setStatus(data.message||'Could not load Gmail inbox.');setLoading(false);return;} setMessages(data.messages||[]);setStatus(`Loaded ${(data.messages||[]).length} Gmail emails.`);setLoading(false); }
+ async function processMessage(messageId:string,force=false){setProcessingId(messageId);setStatus('Processing full email and supported attachments with AI...');const response=await fetch('/api/gmail/process',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({connectionId:selectedConnectionId,messageId,force})});const data=await response.json();setProcessingId(null);if(!response.ok){setStatus(data.message||'Could not process Gmail message.');return;}if(data.orderId){window.location.href=`/orders/${data.orderId}`;return;}setStatus(data.message||'Gmail message processed.');}
+ if(connections.length===0)return null;
+ return <section className="card space-y-4"><div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"><div><h2 className="text-xl font-black">Gmail Order Inbox</h2><p className="text-sm text-slate-500">Load recent Gmail emails and process selected customer orders.</p></div><div className="flex flex-col gap-2 md:flex-row"><select className="input md:w-80" value={selectedConnectionId} onChange={e=>setSelectedConnectionId(e.target.value)}>{connections.map(c=><option key={c.id} value={c.id}>{c.email||'Connected Gmail mailbox'}</option>)}</select><button className="btn" disabled={loading||!selectedConnectionId} onClick={loadInbox}>{loading?'Loading...':'Load Gmail Emails'}</button></div></div><div className="grid gap-3 md:grid-cols-4"><label><span className="section-label">Load</span><select className="input mt-1" value={limit} onChange={e=>setLimit(Number(e.target.value))}><option value={25}>Last 25 emails</option><option value={50}>Last 50 emails</option><option value={100}>Last 100 emails</option></select></label><label><span className="section-label">From date</span><input className="input mt-1" type="date" value={fromDate} onChange={e=>setFromDate(e.target.value)} /></label><label><span className="section-label">To date</span><input className="input mt-1" type="date" value={toDate} onChange={e=>setToDate(e.target.value)} /></label>{allowAiClassificationOnLoad&&<label className="flex items-end gap-2 text-sm text-slate-600"><input type="checkbox" checked={classifyOnLoad} onChange={e=>setClassifyOnLoad(e.target.checked)} /> Use AI classification on load</label>}</div>{status&&<p className="rounded-2xl bg-slate-50 p-3 text-sm text-slate-700">{status}</p>}<div className="space-y-3">{messages.map(message=><div key={message.id} className="rounded-2xl border border-slate-200 bg-white p-4"><div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between"><div className="min-w-0"><div className="mb-2 flex flex-wrap items-center gap-2"><span className={badgeClass(message.classification.category)}>{message.classification.category}</span><span className="badge badge-gray">{Math.round(message.classification.confidence*100)}%</span>{message.alreadyProcessed&&<span className="badge badge-green">Processed</span>}</div><p className="font-semibold text-slate-950">{message.subject}</p><p className="text-sm text-slate-500">From: {message.from}</p><p className="text-sm text-slate-500">Date: {message.date}</p><p className="mt-2 text-sm text-slate-700">{message.snippet}</p>{message.classification.reason&&<p className="mt-2 text-xs text-slate-500">AI reason: {message.classification.reason}</p>}{message.hasAttachments&&<p className="mt-2 text-xs text-slate-500">Attachments: {message.attachmentNames.join(', ')}</p>}</div><div className="flex shrink-0 flex-col gap-2"><button className="btn-secondary" disabled={processingId===message.id||message.alreadyProcessed||message.classification.category==='NOT_ORDER'} onClick={()=>processMessage(message.id)}>{message.alreadyProcessed?'Processed':processingId===message.id?'Processing...':'Process Email'}</button>{message.classification.category==='NOT_ORDER'&&!message.alreadyProcessed&&<button className="btn-secondary" disabled={processingId===message.id} onClick={()=>processMessage(message.id,true)}>Process Anyway</button>}</div></div></div>)}</div></section>;
 }
