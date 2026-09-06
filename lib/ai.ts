@@ -52,6 +52,20 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function retryDelayMs(response: Response, result: any, attempt: number) {
+  const retryAfter = Number(response.headers.get('retry-after') || '');
+  if (Number.isFinite(retryAfter) && retryAfter > 0) return Math.ceil(retryAfter * 1000) + 1000;
+
+  const message = String(result?.error?.message || '');
+  const match = message.match(/try again in\s+([\d.]+)\s*(ms|s)/i);
+  if (match) {
+    const value = Number(match[1]);
+    if (Number.isFinite(value) && value > 0) return Math.ceil(match[2].toLowerCase() === 'ms' ? value : value * 1000) + 1000;
+  }
+
+  return [15000, 25000, 35000][attempt] || 35000;
+}
+
 async function callGroqJson(prompt: string, options?: { model?: string; maxTokens?: number; retryOnRateLimit?: boolean }) {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error('GROQ_API_KEY missing in Vercel environment variables');
@@ -75,8 +89,13 @@ async function callGroqJson(prompt: string, options?: { model?: string; maxToken
   }
 
   let { response, result } = await callOnce();
-  if (!response.ok && options?.retryOnRateLimit !== false && result?.error?.code === 'rate_limit_exceeded') {
-    await sleep(9000);
+  const maxRetries = options?.retryOnRateLimit === false ? 0 : 3;
+
+  for (let attempt = 0; !response.ok && attempt < maxRetries; attempt += 1) {
+    const isRateLimit = response.status === 429 || result?.error?.code === 'rate_limit_exceeded';
+    if (!isRateLimit) break;
+
+    await sleep(retryDelayMs(response, result, attempt));
     const retry = await callOnce();
     response = retry.response;
     result = retry.result;
@@ -168,7 +187,6 @@ Attachment names: ${attachmentNames}
   const type = validTypes.includes(parsed.type) ? (parsed.type as EmailOrderType) : undefined;
 
   let category = ['ORDER', 'NOT_ORDER', 'UNCLEAR'].includes(parsed.category) ? parsed.category : 'UNCLEAR';
-  // Enforce consistency between type and category so junk never becomes an order.
   if (type === 'customer_order') category = 'ORDER';
   else if (type === 'quote') category = 'UNCLEAR';
   else if (type && type !== 'other') category = 'NOT_ORDER';
