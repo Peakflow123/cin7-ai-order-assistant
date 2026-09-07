@@ -13,6 +13,26 @@ function normalizePo(po?: string | null) {
   return cleaned.length >= 3 ? cleaned : null;
 }
 
+function normalizeSubject(subject?: string | null) {
+  return String(subject || '')
+    .replace(/^\s*((re|fw|fwd)\s*:\s*)+/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function isReplyOrForward(subject?: string | null) {
+  return /^\s*(re|fw|fwd)\s*:/i.test(String(subject || ''));
+}
+
+function lineSignature(lines: { rawProductText: string; quantity: number }[]) {
+  if (!lines.length) return null;
+  return lines
+    .map((line) => `${Number(line.quantity || 1)}x${String(line.rawProductText || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ')}`)
+    .sort()
+    .join('|');
+}
+
 function computeContentHash(customerText: string | null | undefined, lines: { rawProductText: string; quantity: number }[]) {
   const cust = String(customerText || '').trim().toLowerCase().replace(/\s+/g, ' ');
   const normalizedLines = lines
@@ -79,25 +99,50 @@ export async function processEmailIntoOrder(input: {
     }
   }
 
-  if (!input.force && normalizedPo) {
-    const samePo = await prisma.order.findFirst({
-      where: { companyId: input.companyId, normalizedPo },
-      select: { id: true }
+  // Legacy-safe fallback: older automatically created orders may not have a thread ID.
+  // Only applies to subjects that are explicitly replies/forwards and compares the original subject plus PO/line items.
+  if (!input.force && isReplyOrForward(input.subject)) {
+    const normalizedCurrentSubject = normalizeSubject(input.subject);
+    const currentLineSignature = lineSignature(extracted.lines);
+    const recentOrders = await prisma.order.findMany({
+      where: { companyId: input.companyId },
+      select: {
+        id: true,
+        subject: true,
+        normalizedPo: true,
+        lines: { select: { rawProductText: true, quantity: true } }
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 100
     });
-    if (samePo) {
-      return { orderId: samePo.id, alreadyProcessed: true, duplicate: true, message: 'Reply or forward ignored because this PO number already exists.' };
+
+    const replySourceOrder = recentOrders.find((order) => {
+      if (normalizeSubject(order.subject) !== normalizedCurrentSubject) return false;
+      const samePo = Boolean(normalizedPo) && order.normalizedPo === normalizedPo;
+      const sameLines = Boolean(currentLineSignature) && lineSignature(order.lines) === currentLineSignature;
+      const noNewOrderLines = extracted.lines.length === 0;
+      return samePo || sameLines || noNewOrderLines;
+    });
+
+    if (replySourceOrder) {
+      return {
+        orderId: replySourceOrder.id,
+        alreadyProcessed: true,
+        duplicate: true,
+        message: 'Reply or forward ignored because the original order was already captured.'
+      };
     }
+  }
+
+  if (!input.force && normalizedPo) {
+    const samePo = await prisma.order.findFirst({ where: { companyId: input.companyId, normalizedPo }, select: { id: true } });
+    if (samePo) return { orderId: samePo.id, alreadyProcessed: true, duplicate: true, message: 'Reply or forward ignored because this PO number already exists.' };
   }
 
   if (!input.force && contentHash) {
     const since = new Date(Date.now() - 72 * 60 * 60 * 1000);
-    const sameContent = await prisma.order.findFirst({
-      where: { companyId: input.companyId, contentHash, createdAt: { gte: since } },
-      select: { id: true }
-    });
-    if (sameContent) {
-      return { orderId: sameContent.id, alreadyProcessed: true, duplicate: true, message: 'Reply or forward ignored because the same customer and order lines were captured recently.' };
-    }
+    const sameContent = await prisma.order.findFirst({ where: { companyId: input.companyId, contentHash, createdAt: { gte: since } }, select: { id: true } });
+    if (sameContent) return { orderId: sameContent.id, alreadyProcessed: true, duplicate: true, message: 'Reply or forward ignored because the same customer and order lines were captured recently.' };
   }
 
   const senderEmail = extractEmailAddress(input.sender);
@@ -106,24 +151,12 @@ export async function processEmailIntoOrder(input: {
 
   const order = await prisma.order.create({
     data: {
-      companyId: input.companyId,
-      source: input.source,
-      sourceConnectionId: input.sourceConnectionId || null,
-      sourceAccount: input.sourceAccount || null,
-      sourceMessageId: input.sourceMessageId,
-      internetMessageId,
-      threadId,
-      normalizedPo,
-      contentHash,
-      possibleDuplicate: false,
-      duplicateReason: null,
-      sender: senderEmail,
-      subject: input.subject,
-      originalText: input.bodyText,
-      customerText: extracted.customerText || null,
-      customerId: customer?.id || null,
-      poNumber: extracted.poNumber || null,
-      status: 'NEEDS_REVIEW'
+      companyId: input.companyId, source: input.source, sourceConnectionId: input.sourceConnectionId || null,
+      sourceAccount: input.sourceAccount || null, sourceMessageId: input.sourceMessageId, internetMessageId,
+      threadId, normalizedPo, contentHash, possibleDuplicate: false, duplicateReason: null,
+      sender: senderEmail, subject: input.subject, originalText: input.bodyText,
+      customerText: extracted.customerText || null, customerId: customer?.id || null,
+      poNumber: extracted.poNumber || null, status: 'NEEDS_REVIEW'
     }
   });
 
@@ -132,45 +165,24 @@ export async function processEmailIntoOrder(input: {
     const match = await matchProduct(input.companyId, line.rawProductText, customer?.id || null);
     const confidence = match.confidence || 0;
     confidences.push(confidence);
-    await prisma.orderLine.create({
-      data: {
-        orderId: order.id,
-        rawProductText: line.rawProductText,
-        quantity: Number(line.quantity || 1),
-        uom: line.uom || null,
-        productId: confidence >= 0.7 ? match.product?.id || null : null,
-        productName: confidence >= 0.7 ? match.product?.name || null : null,
-        sku: confidence >= 0.7 ? match.product?.sku || null : null,
-        confidence,
-        status: confidence >= 0.85 ? 'MATCHED' : confidence >= 0.7 ? 'NEEDS_REVIEW' : 'UNMATCHED'
-      }
-    });
+    await prisma.orderLine.create({ data: {
+      orderId: order.id, rawProductText: line.rawProductText, quantity: Number(line.quantity || 1), uom: line.uom || null,
+      productId: confidence >= 0.7 ? match.product?.id || null : null,
+      productName: confidence >= 0.7 ? match.product?.name || null : null,
+      sku: confidence >= 0.7 ? match.product?.sku || null : null,
+      confidence, status: confidence >= 0.85 ? 'MATCHED' : confidence >= 0.7 ? 'NEEDS_REVIEW' : 'UNMATCHED'
+    }});
   }
 
   const minimumConfidence = Math.min(customerMatch.confidence || 0, ...(confidences.length ? confidences : [0]));
-  const canAutoCreate = Boolean(
-    company.autoCreateEnabled &&
-    customer &&
-    extracted.lines.length > 0 &&
-    minimumConfidence >= company.autoCreateThreshold
-  );
+  const canAutoCreate = Boolean(company.autoCreateEnabled && customer && extracted.lines.length > 0 && minimumConfidence >= company.autoCreateThreshold);
 
   if (canAutoCreate) {
-    try {
-      await createCin7Sale(input.companyId, order.id);
-    } catch (error) {
-      await prisma.order.update({ where: { id: order.id }, data: { status: 'ERROR', error: error instanceof Error ? error.message : 'Auto-create failed' } });
-    }
+    try { await createCin7Sale(input.companyId, order.id); }
+    catch (error) { await prisma.order.update({ where: { id: order.id }, data: { status: 'ERROR', error: error instanceof Error ? error.message : 'Auto-create failed' } }); }
   }
 
-  return {
-    orderId: order.id,
-    alreadyProcessed: false,
-    autoCreated: canAutoCreate,
-    possibleDuplicate: false,
-    duplicateReason: null,
-    minimumConfidence,
-    classification,
-    message: canAutoCreate ? 'Order auto-created in Cin7.' : 'Order created for review.'
-  };
+  return { orderId: order.id, alreadyProcessed: false, autoCreated: canAutoCreate, possibleDuplicate: false,
+    duplicateReason: null, minimumConfidence, classification,
+    message: canAutoCreate ? 'Order auto-created in Cin7.' : 'Order created for review.' };
 }
