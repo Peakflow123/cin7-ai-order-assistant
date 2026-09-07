@@ -36,20 +36,15 @@ export async function processEmailIntoOrder(input: {
   bodyText: string;
   force?: boolean;
 }) {
-  // 1) Exact same message already processed (same mailbox).
   const existingOrder = await prisma.order.findFirst({ where: { companyId: input.companyId, sourceMessageId: input.sourceMessageId } });
   if (existingOrder) return { orderId: existingOrder.id, alreadyProcessed: true, message: 'This message has already been processed.' };
 
-  // 2) Same email received in ANY mailbox of this company (cross-mailbox exact duplicate).
   const internetMessageId = input.internetMessageId ? String(input.internetMessageId).trim() : null;
   if (internetMessageId) {
     const sameEmail = await prisma.order.findFirst({ where: { companyId: input.companyId, internetMessageId } });
-    if (sameEmail) {
-      return { orderId: sameEmail.id, alreadyProcessed: true, duplicate: true, message: 'This exact email was already captured (it was received in another connected mailbox too).' };
-    }
+    if (sameEmail) return { orderId: sameEmail.id, alreadyProcessed: true, duplicate: true, message: 'This exact email was already captured in another connected mailbox.' };
   }
 
-  // 3) Classify the email (junk filtering happens here).
   const classification = await classifyEmailForOrder({ companyId: input.companyId, subject: input.subject, from: input.sender, bodyText: input.bodyText });
   if (!input.force && classification.category === 'NOT_ORDER' && classification.confidence >= 0.7) {
     return { orderId: null, skipped: true, classification, message: 'Email is not a customer order.' };
@@ -58,56 +53,50 @@ export async function processEmailIntoOrder(input: {
   const company = await prisma.company.findUnique({ where: { id: input.companyId } });
   if (!company) throw new Error('Company not found');
 
-  // 4) Extract order content.
   const extracted = await extractOrderWithAI(input.bodyText);
   const threadId = input.threadId ? String(input.threadId).trim() : null;
   const normalizedPo = normalizePo(extracted.poNumber);
   const contentHash = computeContentHash(extracted.customerText, extracted.lines);
 
-  // 5) Thread-based reply handling (rule B: allow a new order only if new PO or new line items).
   if (threadId) {
     const threadOrders = await prisma.order.findMany({
       where: { companyId: input.companyId, threadId },
-      select: { id: true, normalizedPo: true, contentHash: true }
+      select: { id: true, normalizedPo: true, contentHash: true },
+      orderBy: { createdAt: 'asc' }
     });
 
     if (threadOrders.length > 0) {
-      // A reply with no extractable order lines is just conversation (thanks/confirmed/etc.).
       if (!input.force && extracted.lines.length === 0) {
-        return { orderId: threadOrders[0].id, alreadyProcessed: true, duplicate: true, message: 'This looks like a reply in an existing order thread with no new order details.' };
+        return { orderId: threadOrders[0].id, alreadyProcessed: true, duplicate: true, message: 'Reply ignored because the existing order thread contains no new order details.' };
       }
 
-      const hasNewPo = Boolean(normalizedPo) && !threadOrders.some((o) => o.normalizedPo && o.normalizedPo === normalizedPo);
-      const hasNewContent = Boolean(contentHash) && !threadOrders.some((o) => o.contentHash && o.contentHash === contentHash);
+      const hasNewPo = Boolean(normalizedPo) && !threadOrders.some((order) => order.normalizedPo === normalizedPo);
+      const hasNewContent = Boolean(contentHash) && !threadOrders.some((order) => order.contentHash === contentHash);
 
-      // Same PO or identical items already captured in this thread -> pure duplicate reply.
       if (!input.force && !hasNewPo && !hasNewContent) {
-        return { orderId: threadOrders[0].id, alreadyProcessed: true, duplicate: true, message: 'This reply matches an order already captured in this thread.' };
+        return { orderId: threadOrders[0].id, alreadyProcessed: true, duplicate: true, message: 'Reply or forward ignored because this order was already captured in the same email thread.' };
       }
-      // Otherwise it has a new PO or new items -> allowed to create a new order (rule B).
     }
   }
 
-  // 6) Possible-duplicate detection (still create, but flag for human review; never auto-create).
-  let possibleDuplicate = false;
-  let duplicateReason: string | null = null;
-
-  // 6a) Same PO number elsewhere in the company.
-  if (normalizedPo) {
-    const samePo = await prisma.order.findFirst({ where: { companyId: input.companyId, normalizedPo } });
+  if (!input.force && normalizedPo) {
+    const samePo = await prisma.order.findFirst({
+      where: { companyId: input.companyId, normalizedPo },
+      select: { id: true }
+    });
     if (samePo) {
-      possibleDuplicate = true;
-      duplicateReason = 'Same PO number as an existing order.';
+      return { orderId: samePo.id, alreadyProcessed: true, duplicate: true, message: 'Reply or forward ignored because this PO number already exists.' };
     }
   }
 
-  // 6b) Same customer + same items within 72 hours (cross-mailbox separate emails).
-  if (!possibleDuplicate && contentHash) {
+  if (!input.force && contentHash) {
     const since = new Date(Date.now() - 72 * 60 * 60 * 1000);
-    const sameContent = await prisma.order.findFirst({ where: { companyId: input.companyId, contentHash, createdAt: { gte: since } } });
+    const sameContent = await prisma.order.findFirst({
+      where: { companyId: input.companyId, contentHash, createdAt: { gte: since } },
+      select: { id: true }
+    });
     if (sameContent) {
-      possibleDuplicate = true;
-      duplicateReason = 'Same customer and items as a recent order (possible duplicate across mailboxes).';
+      return { orderId: sameContent.id, alreadyProcessed: true, duplicate: true, message: 'Reply or forward ignored because the same customer and order lines were captured recently.' };
     }
   }
 
@@ -126,8 +115,8 @@ export async function processEmailIntoOrder(input: {
       threadId,
       normalizedPo,
       contentHash,
-      possibleDuplicate,
-      duplicateReason,
+      possibleDuplicate: false,
+      duplicateReason: null,
       sender: senderEmail,
       subject: input.subject,
       originalText: input.bodyText,
@@ -158,13 +147,11 @@ export async function processEmailIntoOrder(input: {
     });
   }
 
-  // 7) Auto-create policy: respects admin threshold, requires lines, blocks on possible-duplicate.
   const minimumConfidence = Math.min(customerMatch.confidence || 0, ...(confidences.length ? confidences : [0]));
   const canAutoCreate = Boolean(
     company.autoCreateEnabled &&
     customer &&
     extracted.lines.length > 0 &&
-    !possibleDuplicate &&
     minimumConfidence >= company.autoCreateThreshold
   );
 
@@ -180,14 +167,10 @@ export async function processEmailIntoOrder(input: {
     orderId: order.id,
     alreadyProcessed: false,
     autoCreated: canAutoCreate,
-    possibleDuplicate,
-    duplicateReason,
+    possibleDuplicate: false,
+    duplicateReason: null,
     minimumConfidence,
     classification,
-    message: possibleDuplicate
-      ? 'Order created but flagged as a possible duplicate for review.'
-      : canAutoCreate
-        ? 'Order auto-created in Cin7.'
-        : 'Order created for review.'
+    message: canAutoCreate ? 'Order auto-created in Cin7.' : 'Order created for review.'
   };
 }

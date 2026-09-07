@@ -27,9 +27,20 @@ export async function GET(request: Request) {
         if (message.alreadyProcessed) continue;
         if (message.classification.category !== 'ORDER' && message.classification.confidence >= 0.7) { skipped += 1; continue; }
         const full = await getGmailMessageText(connection.id, connection.companyId, message.id);
-        const result = await processEmailIntoOrder({ companyId: connection.companyId, source: 'gmail', sourceConnectionId: connection.id, sourceAccount: connection.email || null, sourceMessageId: `gmail:${connection.id}:${full.messageId}`, sender: full.from, subject: full.subject, bodyText: full.bodyText });
-        if (result.orderId) processed += 1;
-        if (result.skipped) skipped += 1;
+        const result = await processEmailIntoOrder({
+          companyId: connection.companyId,
+          source: 'gmail',
+          sourceConnectionId: connection.id,
+          sourceAccount: connection.email || null,
+          sourceMessageId: `gmail:${connection.id}:${full.messageId}`,
+          internetMessageId: full.internetMessageId || null,
+          threadId: full.threadId || null,
+          sender: full.from,
+          subject: full.subject,
+          bodyText: full.bodyText
+        });
+        if (result.orderId && !result.alreadyProcessed) processed += 1;
+        if (result.skipped || result.duplicate || result.alreadyProcessed) skipped += 1;
       }
       await prisma.gmailConnection.update({ where: { id: connection.id }, data: { lastCheckedAt: new Date() } });
     } catch (error) {
@@ -46,9 +57,20 @@ export async function GET(request: Request) {
         if (message.alreadyProcessed) continue;
         if (message.classification.category !== 'ORDER' && message.classification.confidence >= 0.7) { skipped += 1; continue; }
         const full = await getOutlookMessageText(connection.id, connection.companyId, message.id);
-        const result = await processEmailIntoOrder({ companyId: connection.companyId, source: 'outlook', sourceConnectionId: connection.id, sourceAccount: connection.email || null, sourceMessageId: `outlook:${connection.id}:${full.messageId}`, sender: full.from, subject: full.subject, bodyText: full.bodyText });
-        if (result.orderId) processed += 1;
-        if (result.skipped) skipped += 1;
+        const result = await processEmailIntoOrder({
+          companyId: connection.companyId,
+          source: 'outlook',
+          sourceConnectionId: connection.id,
+          sourceAccount: connection.email || null,
+          sourceMessageId: `outlook:${connection.id}:${full.messageId}`,
+          internetMessageId: full.internetMessageId || null,
+          threadId: full.conversationId || null,
+          sender: full.from,
+          subject: full.subject,
+          bodyText: full.bodyText
+        });
+        if (result.orderId && !result.alreadyProcessed) processed += 1;
+        if (result.skipped || result.duplicate || result.alreadyProcessed) skipped += 1;
       }
       await prisma.outlookConnection.update({ where: { id: connection.id }, data: { lastCheckedAt: new Date() } });
     } catch (error) {
