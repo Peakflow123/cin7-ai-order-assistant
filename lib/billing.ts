@@ -7,28 +7,32 @@ export const BILLING_PLANS = {
     label: 'Free Trial',
     priceLabel: '15 days free',
     monthlyOrderLimit: 100,
+    mailboxLimit: 1,
     mailboxLabel: '1 connected mailbox',
     description: 'No credit card required. Try NexOrder AI with real orders.'
   },
   starter: {
     label: 'Starter',
-    priceLabel: '$49/month',
+    priceLabel: '$99/month',
     monthlyOrderLimit: 300,
+    mailboxLimit: 1,
     mailboxLabel: '1 Gmail or Outlook mailbox',
     description: 'For smaller teams starting with AI order automation.'
   },
   professional: {
     label: 'Professional',
     priceLabel: '$149/month',
-    monthlyOrderLimit: 1500,
-    mailboxLabel: '3 Gmail/Outlook mailboxes',
+    monthlyOrderLimit: 600,
+    mailboxLimit: 3,
+    mailboxLabel: 'Up to 3 Gmail or Outlook mailboxes',
     description: 'For teams processing customer orders every day.'
   },
   business: {
     label: 'Business',
-    priceLabel: '$299/month',
-    monthlyOrderLimit: 5000,
-    mailboxLabel: '5+ mailboxes',
+    priceLabel: '$249/month',
+    monthlyOrderLimit: 1000,
+    mailboxLimit: 5,
+    mailboxLabel: '5+ Gmail or Outlook mailboxes',
     description: 'For higher-volume order operations.'
   }
 } as const;
@@ -60,6 +64,13 @@ export function limitForPlan(plan: string) {
   return BILLING_PLANS.trial.monthlyOrderLimit;
 }
 
+export function mailboxLimitForPlan(plan: string) {
+  if (plan === 'starter') return BILLING_PLANS.starter.mailboxLimit;
+  if (plan === 'professional') return BILLING_PLANS.professional.mailboxLimit;
+  if (plan === 'business') return BILLING_PLANS.business.mailboxLimit;
+  return BILLING_PLANS.trial.mailboxLimit;
+}
+
 export function stripePriceEnvForPlan(plan: string) {
   if (plan === 'starter') return process.env.STRIPE_PRICE_STARTER || null;
   if (plan === 'professional') return process.env.STRIPE_PRICE_PROFESSIONAL || null;
@@ -69,20 +80,8 @@ export function stripePriceEnvForPlan(plan: string) {
 
 export async function getCompanyBilling(companyId: string) {
   const rows = await prisma.$queryRaw<BillingRow[]>`
-    SELECT
-      "id",
-      "name",
-      "subscriptionStatus"::text AS "subscriptionStatus",
-      "trialStartedAt",
-      "trialEndsAt",
-      "planName",
-      "monthlyOrderLimit",
-      "stripeCustomerId",
-      "stripeSubscriptionId",
-      "subscriptionCurrentPeriodEnd"
-    FROM "Company"
-    WHERE "id" = ${companyId}
-    LIMIT 1
+    SELECT "id", "name", "subscriptionStatus"::text AS "subscriptionStatus", "trialStartedAt", "trialEndsAt", "planName", "monthlyOrderLimit", "stripeCustomerId", "stripeSubscriptionId", "subscriptionCurrentPeriodEnd"
+    FROM "Company" WHERE "id" = ${companyId} LIMIT 1
   `;
   const company = rows[0];
   if (!company) throw new Error('Company not found.');
@@ -90,43 +89,25 @@ export async function getCompanyBilling(companyId: string) {
   let status = company.subscriptionStatus || 'trialing';
   if (status === 'trialing' && company.trialEndsAt && company.trialEndsAt.getTime() < Date.now()) {
     status = 'trial_expired';
-    await prisma.$executeRaw`
-      UPDATE "Company"
-      SET "subscriptionStatus" = 'trial_expired'
-      WHERE "id" = ${companyId} AND "subscriptionStatus" = 'trialing'
-    `;
+    await prisma.$executeRaw`UPDATE "Company" SET "subscriptionStatus" = 'trial_expired' WHERE "id" = ${companyId} AND "subscriptionStatus" = 'trialing'`;
   }
 
   const orderRows = await prisma.$queryRaw<Array<{ count: bigint }>>`
-    SELECT COUNT(*)::bigint AS count
-    FROM "Order"
-    WHERE "companyId" = ${companyId}
-      AND "createdAt" >= ${currentMonthStart()}
+    SELECT COUNT(*)::bigint AS count FROM "Order" WHERE "companyId" = ${companyId} AND "createdAt" >= ${currentMonthStart()}
   `;
 
   const ordersThisMonth = Number(orderRows[0]?.count || 0);
   const monthlyOrderLimit = company.monthlyOrderLimit || limitForPlan(company.planName || 'trial');
   const trialDaysRemaining = status === 'trialing' ? Math.max(0, Math.ceil((company.trialEndsAt.getTime() - Date.now()) / 86400000)) : 0;
 
-  return {
-    ...company,
-    subscriptionStatus: status,
-    monthlyOrderLimit,
-    ordersThisMonth,
-    remainingOrders: Math.max(0, monthlyOrderLimit - ordersThisMonth),
-    trialDaysRemaining,
-    isAccessAllowed: status === 'trialing' || status === 'active',
-    isOrderLimitReached: ordersThisMonth >= monthlyOrderLimit
-  };
+  return { ...company, subscriptionStatus: status, monthlyOrderLimit, ordersThisMonth,
+    remainingOrders: Math.max(0, monthlyOrderLimit - ordersThisMonth), trialDaysRemaining,
+    isAccessAllowed: status === 'trialing' || status === 'active', isOrderLimitReached: ordersThisMonth >= monthlyOrderLimit };
 }
 
 export async function assertCanProcessOrder(companyId: string) {
   const billing = await getCompanyBilling(companyId);
-  if (!billing.isAccessAllowed) {
-    throw new Error('Your trial or subscription is not active. Please open Billing to continue using NexOrder AI.');
-  }
-  if (billing.isOrderLimitReached) {
-    throw new Error(`Monthly order limit reached (${billing.ordersThisMonth}/${billing.monthlyOrderLimit}). Please upgrade your plan to continue processing orders.`);
-  }
+  if (!billing.isAccessAllowed) throw new Error('Your trial or subscription is not active. Please open Billing to continue using NexOrder AI.');
+  if (billing.isOrderLimitReached) throw new Error(`Monthly order limit reached (${billing.ordersThisMonth}/${billing.monthlyOrderLimit}). Please upgrade your plan to continue processing orders.`);
   return billing;
 }
