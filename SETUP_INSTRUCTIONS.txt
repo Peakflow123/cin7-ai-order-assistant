@@ -1,0 +1,23 @@
+NEXORDER INBOUND ORDER EMAIL SETUP
+
+Files in the main project can be deployed first. The database migration creates a unique token for every existing company; registration creates one for every new company.
+
+Required registrations/configuration:
+1. Create a free Cloudflare account if you do not have one.
+2. Move DNS management for the chosen inbound subdomain/domain to Cloudflare and enable Email Routing.
+3. Deploy the included cloudflare-email-worker project.
+4. In Cloudflare Worker secrets/variables set:
+   NEXORDER_INBOUND_URL=https://YOUR-APP-DOMAIN/api/inbound-email/cloudflare
+   INBOUND_EMAIL_SECRET=a-long-random-secret
+5. In Vercel set the exact same INBOUND_EMAIL_SECRET.
+6. In Vercel set INBOUND_EMAIL_DOMAIN to the domain that receives mail, for example orders.nexorderai.com.
+7. In Cloudflare Email Routing create a catch-all route for the inbound domain and choose the Worker action.
+
+Commands inside cloudflare-email-worker:
+  npm install
+  npx wrangler login
+  npx wrangler secret put INBOUND_EMAIL_SECRET
+  npx wrangler secret put NEXORDER_INBOUND_URL
+  npm run deploy
+
+Cloudflare currently documents inbound Email Routing as available on Free and Paid plans and an inbound message limit of 25 MiB.
