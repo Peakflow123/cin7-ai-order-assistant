@@ -5,6 +5,11 @@ type Account = { channel: 'gmail' | 'outlook' | 'inbound-email'; email: string }
 const channelNames: Record<Account['channel'], string> = {
   gmail: 'Gmail', outlook: 'Outlook', 'inbound-email': 'Direct Email'
 };
+function accountOptionLabel(account: Account) {
+  return account.channel === 'inbound-email'
+    ? 'Direct Email'
+    : `${account.email} (${channelNames[account.channel]})`;
+}
 
 export default function OrderFilters({ action, q = '', source, account, from, to, tab, accounts, columns = 5 }: {
   action: string; q?: string; source: string; account: string; from: string; to: string; tab?: string;
@@ -25,7 +30,7 @@ export default function OrderFilters({ action, q = '', source, account, from, to
       <option value="">All channels</option><option value="gmail">Gmail</option><option value="outlook">Outlook</option><option value="inbound-email">Direct Email</option>
     </select></label>
     <label><span className="section-label">Account / Mailbox</span><select className="input mt-1" name="account" value={mailbox} onChange={(e) => setMailbox(e.target.value)}>
-      <option value="">All accounts</option>{visibleAccounts.map((a) => <option key={`${a.channel}:${a.email}`} value={a.email}>{a.email} ({channelNames[a.channel]})</option>)}
+      <option value="">All accounts</option>{visibleAccounts.map((a) => <option key={`${a.channel}:${a.email}`} value={a.email}>{accountOptionLabel(a)}</option>)}
     </select></label>
     <label><span className="section-label">From date</span><input className="input mt-1" type="date" name="from" defaultValue={from} /></label>
     <label><span className="section-label">To date</span><input className="input mt-1" type="date" name="to" defaultValue={to} /></label>
